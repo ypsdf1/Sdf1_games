@@ -1,0 +1,18 @@
+name: Sdf1_game
+version: 1.0
+main: Sdf1_game.Main
+api-version: '1.21'
+description: 快问快答 - 自动答题赢债券
+softdepend: [Sdf1_login]
+
+commands:
+  quiz:
+    description: 快问快答管理
+    usage: /quiz <reload|start|stop|test>
+    permission: sdf1_quiz.admin
+  出题:
+    description: 快问快答出题
+    usage: /出题 [选择题1]
+permissions:
+  sdf1_quiz.admin:
+    default: op
