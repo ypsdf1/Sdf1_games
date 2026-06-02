@@ -11,7 +11,7 @@
 | 寻宝 | 已实现 |
 
 ## 必装依赖
-- [Sdf1_login](https://github.com/ypsdf1/Sdf1_login) 用途：经济提供者
+- [Sdf1_login](https://gitee.com/nihaoshidifu/sdf1_login) 用途：经济提供者
 
 ## 指令介绍
 | 指令 | 参数1 | 参数2 | 参数3 |  结果|
