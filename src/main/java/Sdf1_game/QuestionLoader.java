@@ -23,6 +23,14 @@ public class QuestionLoader {
         File file = new File(
                 plugin.getDataFolder(), resourcePath);
 
+        plugin.getLogger().info(
+                "[快问快答] 加载文件: "
+                        + file.getAbsolutePath()
+                        + " 存在=" + file.exists()
+                        + " 大小=" + (file.exists()
+                        ? file.length() + "字节"
+                        : "N/A"));
+
         if (!file.exists()) {
             plugin.getLogger().warning(
                     "[快问快答] 文件不存在: "
@@ -46,6 +54,21 @@ public class QuestionLoader {
 
             List<String> cleaned = cleanComments(br);
 
+            plugin.getLogger().info(
+                    "[快问快答] 有效行数: "
+                            + cleaned.size());
+            if (!cleaned.isEmpty()) {
+                plugin.getLogger().info(
+                        "[快问快答] 前3行: "
+                                + cleaned.get(0)
+                                + (cleaned.size() > 1
+                                ? " | " + cleaned.get(1)
+                                : "")
+                                + (cleaned.size() > 2
+                                ? " | " + cleaned.get(2)
+                                : ""));
+            }
+
             switch (type) {
                 case CHOICE:
                     parseChoice(cleaned, questions);
@@ -57,6 +80,11 @@ public class QuestionLoader {
                     parseOpen(cleaned, questions);
                     break;
             }
+
+            plugin.getLogger().info(
+                    "[快问快答] 解析出: "
+                            + questions.size() + "题"
+                            + " (" + resourcePath + ")");
 
         } catch (IOException e) {
             plugin.getLogger().warning(

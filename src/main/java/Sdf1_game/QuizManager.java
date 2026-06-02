@@ -8,7 +8,7 @@ import org.bukkit.event.Listener;
 import org.bukkit.event.player.AsyncPlayerChatEvent;
 import org.bukkit.scheduler.BukkitRunnable;
 import org.bukkit.scheduler.BukkitTask;
-
+import org.bukkit.command.CommandSender;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -64,6 +64,12 @@ public class QuizManager implements Listener {
             "§c你回答太快了，请冷静10秒！";
     private String punishEndMsg =
             "§a罚时已结束，你可以继续答题了";
+    // 填空题：记录每个玩家的答案
+    private final Map<UUID, String> fillAnswers
+            = new ConcurrentHashMap<>();
+    private final Map<UUID, Set<String>> multiAnswers
+            = new ConcurrentHashMap<>();
+
 
 
     public QuizManager(Main plugin, BondBridge bb) {
@@ -117,6 +123,69 @@ public class QuizManager implements Listener {
         }
     }
 
+    /** 填空题多空：抢答，全空答对才提交 */
+    private void handleFillAnswer(
+            AsyncPlayerChatEvent event,
+            String msg,
+            Question q,
+            Player player,
+            UUID uid) {
+        event.setCancelled(true);
+
+        if (answered.contains(uid)) return;
+
+        // 罚时期间忽略
+        if (isPunished(uid)) return;
+
+        // 解析玩家答案
+        String[] playerParts = msg
+                .replaceAll("[,，\\s]+", ",")
+                .split(",");
+        String[] correctParts =
+                q.getAnswer().split("[,，]");
+
+        // 逐空比对
+        int correctCount = 0;
+        for (int i = 0;
+             i < correctParts.length
+                     && i < playerParts.length; i++) {
+            if (correctParts[i].trim().toLowerCase()
+                    .equals(playerParts[i].trim()
+                            .toLowerCase())) {
+                correctCount++;
+            }
+        }
+
+        // 全部答对 → 获胜
+        if (correctCount >= correctParts.length) {
+            answered.add(uid);
+            wrongTimes.remove(uid);
+            fillAnswers.remove(uid);
+
+            int reward;
+            if (q.getRewards().length > 1) {
+                reward = q.getRewardForCount(
+                        correctCount);
+            } else {
+                reward = q.getRewards()[0];
+            }
+
+            broadcastAnswer(player, q, reward,
+                    "填空题");
+            return;
+        }
+
+        // ★ 答错或部分答对 → 记录，等超时结算
+        fillAnswers.put(uid, msg.trim());
+
+        // 蒙题防护：纯数字短答案检测
+        if (msg.matches("[\\d,，\\s]+")) {
+            recordWrong(uid);
+            if (shouldPunish(uid)) {
+                applyPunish(uid, player);
+            }
+        }
+    }
 
     // ========== 读配置 ==========
 
@@ -196,20 +265,84 @@ public class QuizManager implements Listener {
 
     public void loadQuestions() {
         loadConfig();
-        choiceQ = QuestionLoader.load(plugin,
-                "快问快答/题目/选择题.md");
-        multiQ = QuestionLoader.load(plugin,
-                "快问快答/题目/多选题.md");
-        fillQ = QuestionLoader.load(plugin,
-                "快问快答/题目/填空题.md");
-        openQ = QuestionLoader.load(plugin,
-                "快问快答/题目/问答题.md");
+
+        int oldChoice = choiceQ.size();
+        int oldFill = fillQ.size();
+        int oldOpen = openQ.size();
+        int oldMulti = multiQ.size();
+
+        // ★ 每次重新创建列表
+        choiceQ = new ArrayList<>(
+                QuestionLoader.load(plugin,
+                        "快问快答/题目/选择题.md"));
+        multiQ = new ArrayList<>(
+                QuestionLoader.load(plugin,
+                        "快问快答/题目/多选题.md"));
+        fillQ = new ArrayList<>(
+                QuestionLoader.load(plugin,
+                        "快问快答/题目/填空题.md"));
+        openQ = new ArrayList<>(
+                QuestionLoader.load(plugin,
+                        "快问快答/题目/问答题.md"));
 
         plugin.getLogger().info(
-                "[快问快答] 单选" + choiceQ.size()
-                        + " 多选" + multiQ.size()
-                        + " 填空" + fillQ.size()
-                        + " 问答" + openQ.size());
+                "[快问快答] ★题目重载完成:");
+        plugin.getLogger().info(
+                "[快问快答]   选择题: "
+                        + oldChoice + " → "
+                        + choiceQ.size());
+        plugin.getLogger().info(
+                "[快问快答]   多选题: "
+                        + oldMulti + " → "
+                        + multiQ.size());
+        plugin.getLogger().info(
+                "[快问快答]   填空题: "
+                        + oldFill + " → "
+                        + fillQ.size());
+        plugin.getLogger().info(
+                "[快问快答]   问答题: "
+                        + oldOpen + " → "
+                        + openQ.size());
+    }
+
+    public void reload() {
+        stopAuto();
+        if (countTask != null) {
+            countTask.cancel();
+            countTask = null;
+        }
+        loadQuestions();
+        firstRun = true;
+        lastQuizTime = System.currentTimeMillis();
+        startAuto();
+        plugin.getLogger().info(
+                "[快问快答] ★已重载并重启自动出题");
+        plugin.getLogger().info("\n" +
+                " __          __  _                            _                                                                        \n" +
+                " \\ \\        / / | |                          | |                                                                       \n" +
+                "  \\ \\  /\\  / /__| | ___ ___  _ __ ___   ___  | |_ ___                                                                  \n" +
+                "   \\ \\/  \\/ / _ \\ |/ __/ _ \\| '_ ` _ \\ / _ \\ | __/ _ \\                                                                 \n" +
+                "    \\  /\\  /  __/ | (_| (_) | | | | | |  __/ | || (_) |                                                                \n" +
+                "     \\/  \\/ \\___|_|\\___\\___/|_| |_| |_|\\___|  \\__\\___/              _                                                  \n" +
+                "                                             | |                   (_)                                                 \n" +
+                "   ___ __ _  ___    _   _ _   _  __ _ _ __   | |_ __ _ _ __   __  ___  __ _ _ __    ___  ___ _ ____   _____ _ __       \n" +
+                "  / __/ _` |/ _ \\  | | | | | | |/ _` | '_ \\  | __/ _` | '_ \\  \\ \\/ / |/ _` | '_ \\  / __|/ _ \\ '__\\ \\ / / _ \\ '__|      \n" +
+                " | (_| (_| | (_) | | |_| | |_| | (_| | | | | | || (_| | | | |  >  <| | (_| | | | | \\__ \\  __/ |   \\ V /  __/ |         \n" +
+                "  \\___\\__,_|\\___/   \\__, |\\__,_|\\__,_|_| |_|  \\__\\__,_|_| |_|_/_/\\_\\_|\\__,_|_| |_| |___/\\___|_|_  _\\_/ \\___|_|         \n" +
+                "                     __/ |      (_)     _                 |__ \\                 | |   (_)   | (_)/ _|                  \n" +
+                "  ___  ___ _ ____   |___/ _ __   _ _ __(_)  _ __ ___   ___   ) | _   _ _ __  ___| |__  _  __| |_| |_ _   _   ___ _ __  \n" +
+                " / __|/ _ \\ '__\\ \\ / / _ \\ '__| | | '_ \\   | '_ ` _ \\ / __| / / | | | | '_ \\/ __| '_ \\| |/ _` | |  _| | | | / __| '_ \\ \n" +
+                " \\__ \\  __/ |   \\ V /  __/ |    | | |_) |  | | | | | | (__ / /_ | |_| | |_) \\__ \\ | | | | (_| | | | | |_| || (__| | | |\n" +
+                " |___/\\___|_|    \\_/ \\___|_|    |_| .__(_) |_| |_| |_|\\___|____(_)__, | .__/|___/_| |_|_|\\__,_|_|_|  \\__,_(_)___|_| |_|\n" +
+                "                                  | |                             __/ | |                                              \n" +
+                "                  _       ____   _|_|   ________ ___             |___/|_|                                              \n" +
+                "                 | |  _  |___ \\ / _ \\  / /____  / _ \\                                                                  \n" +
+                "  _ __   ___  ___| |_(_)   __) | | | |/ /_   / / (_) |                                                                 \n" +
+                " | '_ \\ / _ \\/ __| __|    |__ <| | | | '_ \\ / / \\__, |                                                                 \n" +
+                " | |_) | (_) \\__ \\ |_ _   ___) | |_| | (_) / /    / /                                                                  \n" +
+                " | .__/ \\___/|___/\\__(_) |____/ \\___/ \\___/_/    /_/                                                                   \n" +
+                " | |                                                                                                                   \n" +
+                " |_|                                                                                                                   ");
     }
 
     public int getMultiCount() {
@@ -477,6 +610,7 @@ public class QuizManager implements Listener {
                 }
                 msg.append("\n§7§o多个答案用逗号分隔"
                         + "，如: A,B");
+
                 // 显示赏金明细
                 int[] rw = q.getRewards();
                 if (rw.length > 1) {
@@ -565,7 +699,6 @@ public class QuizManager implements Listener {
     }
 
     // ========== 结束 ==========
-
     private void endQuiz(boolean hadWinner) {
         Question snapshot;
         synchronized (lock) {
@@ -577,23 +710,296 @@ public class QuizManager implements Listener {
             countTask.cancel();
             countTask = null;
         }
+
         if (!hadWinner) {
             Bukkit.broadcastMessage(prefix
                     + "§72分钟内无人答对，本题跳过~");
+
             if (snapshot != null) {
                 Bukkit.broadcastMessage(prefix
                         + "§e正确答案: §a"
                         + snapshot.getAnswer());
+
+                // ★ 填空题超时结算
+                if (snapshot.getType()
+                        == Question.Type.MULTI
+                        && !multiAnswers.isEmpty()) {
+
+                    Set<String> correctSet =
+                            new HashSet<>();
+                    for (String s : snapshot
+                            .getAnswer().split(",")) {
+                        correctSet.add(s.trim()
+                                .toLowerCase());
+                    }
+
+                    int bestCount = 0;
+                    UUID bestUid = null;
+
+                    for (Map.Entry<UUID,
+                            Set<String>> entry
+                            : multiAnswers.entrySet()) {
+                        int correct = 0;
+                        for (String c : correctSet) {
+                            if (entry.getValue()
+                                    .contains(c))
+                                correct++;
+                        }
+                        if (correct > bestCount) {
+                            bestCount = correct;
+                            bestUid = entry.getKey();
+                        }
+                    }
+
+                    if (bestUid == null) return;
+
+                    boolean mustFull = snapshot
+                            .getRewards().length == 1;
+
+                    if (mustFull
+                            && bestCount < correctSet.size()) {
+                        Bukkit.broadcastMessage(prefix
+                                + "§7本题要求全对，"
+                                + "无人全对，不发奖");
+                        return;
+                    }
+
+                    // 只给最先到达的那一个
+                    giveMultiTimeoutReward(
+                            snapshot, bestUid,
+                            bestCount);
+                }
+
+
                 String nextTime = getNextQuizTime();
                 Bukkit.broadcastMessage(prefix
                         + "§7下次出题: §e"
                         + nextTime);
             }
         }
+
+        multiAnswers.clear();
+        fillAnswers.clear();
+    }
+
+    private void giveMultiTimeoutReward(
+            Question q, UUID pUid, int correctCount) {
+        Player p = Bukkit.getPlayer(pUid);
+        if (p == null || !p.isOnline()) return;
+
+        int reward = q.getRewards().length > 1
+                ? q.getRewardForCount(correctCount)
+                : q.getRewards()[0];
+
+        boolean bondOk = false;
+        if (bondBridge.isHooked()) {
+            bondOk = bondBridge.addBonds(
+                    p.getName(), reward,
+                    "多选题超时" + correctCount + "对");
+        }
+
+        Bukkit.broadcastMessage(prefix
+                + "§a" + p.getName()
+                + " §7答对了 §e" + correctCount
+                + "§7 个选项，获得 §6" + reward
+                + " §e债券"
+                + (bondOk ? "" : "(债券未连接)"));
+    }
+
+
+    /** 填空题超时：只给最先到达且答对最多的人 */
+    private void settleFillTimeout(Question q) {
+        String[] correctParts =
+                q.getAnswer().split("[,，]");
+        int totalBlanks = correctParts.length;
+
+        // 统计每个人答对几个空
+        int bestCount = 0;
+        UUID bestUid = null;
+
+        for (Map.Entry<UUID, String> entry
+                : fillAnswers.entrySet()) {
+            int correct = countFillCorrect(
+                    entry.getValue(), correctParts);
+            if (correct > bestCount) {
+                bestCount = correct;
+                bestUid = entry.getKey();
+            }
+        }
+
+        if (bestUid == null) return;
+
+        boolean mustFull =
+                q.getRewards().length == 1;
+
+        if (mustFull && bestCount < totalBlanks) {
+            Bukkit.broadcastMessage(prefix
+                    + "§7本题要求全对，无人全对，不发奖");
+            return;
+        }
+
+        giveFillReward(q, bestUid, bestCount);
+    }
+
+    private int countFillCorrect(String playerAns,
+                                 String[] correct) {
+        String[] pp = playerAns
+                .replaceAll("[,，\\s]+", ",")
+                .split(",");
+        int c = 0;
+        for (int i = 0;
+             i < correct.length
+                     && i < pp.length; i++) {
+            if (correct[i].trim().toLowerCase()
+                    .equals(pp[i].trim()
+                            .toLowerCase())) {
+                c++;
+            }
+        }
+        return c;
+    }
+
+    private void giveFillReward(Question q,
+                                UUID pUid,
+                                int correctCount) {
+        Player p = Bukkit.getPlayer(pUid);
+        if (p == null || !p.isOnline()) return;
+
+        int reward;
+        if (q.getRewards().length > 1) {
+            reward = q.getRewardForCount(
+                    correctCount);
+        } else {
+            reward = q.getRewards()[0];
+        }
+
+        boolean bondOk = false;
+        if (bondBridge.isHooked()) {
+            bondOk = bondBridge.addBonds(
+                    p.getName(), reward,
+                    "填空题" + correctCount + "空对");
+        }
+
+        Bukkit.broadcastMessage(prefix
+                + "§a" + p.getName()
+                + " §7答对了 §e" + correctCount
+                + "/" + q.getBlankCount()
+                + "§7 空，获得 §6" + reward
+                + " §e债券"
+                + (bondOk ? "" : "(债券未连接)"));
+    }
+
+
+
+
+    /** 多选题发奖 */
+    private void giveMultiReward(Question q,
+                                 UUID pUid,
+                                 int correctCount) {
+        Player p = Bukkit.getPlayer(pUid);
+        if (p == null || !p.isOnline()) return;
+
+        int reward =
+                q.getRewardForCount(correctCount);
+
+        boolean bondOk = false;
+        if (bondBridge.isHooked()) {
+            bondOk = bondBridge.addBonds(
+                    p.getName(), reward,
+                    "多选题" + correctCount + "对");
+        }
+
+        Bukkit.broadcastMessage(prefix
+                + "§a" + p.getName()
+                + " §7答对了 §e" + correctCount
+                + "§7 个选项，获得 §6" + reward
+                + " §e债券"
+                + (bondOk ? "" : "(债券未连接)"));
+    }
+    /** 多选题：抢答，第一个全对的获胜 */
+    private void handleMultiAnswer(
+            AsyncPlayerChatEvent event,
+            String msg,
+            Question q,
+            Player player,
+            UUID uid) {
+        event.setCancelled(true);
+
+        if (answered.contains(uid)) return;
+
+        Set<String> correctSet = new HashSet<>();
+        for (String s : q.getAnswer().split(",")) {
+            correctSet.add(s.trim().toLowerCase());
+        }
+
+        Set<String> playerSet = new HashSet<>();
+        for (String s :
+                msg.split("[,，\\s]+")) {
+            String clean = s.trim().toLowerCase()
+                    .replaceAll(
+                            "[()（）.,。，]", "");
+            if (!clean.isEmpty()) {
+                playerSet.add(clean);
+            }
+        }
+
+        // 是否全对
+        boolean fullMatch = correctSet
+                .equals(playerSet);
+
+        if (!fullMatch) {
+            // 没全对 → 提示，继续抢答
+            int correct = 0;
+            for (String c : correctSet) {
+                if (playerSet.contains(c)) correct++;
+            }
+            if (correct > 0) {
+                player.sendMessage("§e答对了 §a"
+                        + correct + "/"
+                        + correctSet.size()
+                        + "§e 个，继续抢答！");
+            } else {
+                player.sendMessage(
+                        "§7答错了，再试试！");
+            }
+            return;
+        }
+
+        // ★ 全对 → 第一个答对的获胜
+        answered.add(uid);
+
+        int reward = q.getRewards().length > 1
+                ? q.getRewardForCount(
+                correctSet.size())
+                : q.getRewards()[0];
+
+        boolean bondOk = false;
+        if (bondBridge.isHooked()) {
+            bondOk = bondBridge.addBonds(
+                    player.getName(), reward,
+                    "多选题答对");
+        }
+
+        String info = bondOk
+                ? "§6" + reward + " §e债券"
+                : "§7(债券未连接)";
+
+        Bukkit.broadcastMessage(prefix
+                + "§a" + player.getName()
+                + " §7抢答成功§e[多选题]§7!");
+        Bukkit.broadcastMessage(prefix
+                + "§e正确答案: §a"
+                + q.getAnswer());
+        Bukkit.broadcastMessage(prefix
+                + "§e赏金: " + info);
+        Bukkit.broadcastMessage(prefix
+                + "§7下次出题: §e"
+                + getNextQuizTime());
+
+        endQuiz(true);
     }
 
     // ========== 聊天监听 ==========
-
     @EventHandler(priority = EventPriority.HIGHEST,
             ignoreCancelled = true)
     public void onChat(AsyncPlayerChatEvent event) {
@@ -610,86 +1016,140 @@ public class QuizManager implements Listener {
         String msg = event.getMessage().trim();
         if (msg.isEmpty()) return;
 
-        // ★ 蒙题防护：罚时期间直接跳过
-        if (isPunished(uid)) {
-            player.sendMessage(punishStartMsg);
+        if (isPunished(uid)) return;
+
+        // ★ 多选题：只处理全对
+        if (q.getType() == Question.Type.MULTI) {
+            Set<String> correctSet = new HashSet<>();
+            for (String s : q.getAnswer().split(",")) {
+                correctSet.add(s.trim().toLowerCase());
+            }
+            Set<String> playerSet = new HashSet<>();
+            for (String s : msg.split("[,，\\s]+")) {
+                String clean = s.trim().toLowerCase()
+                        .replaceAll("[()（）.,。，]", "");
+                if (!clean.isEmpty()) {
+                    playerSet.add(clean);
+                }
+            }
+            if (!correctSet.equals(playerSet)) return;
+
+            event.setCancelled(true);
+            answered.add(uid);
+            wrongTimes.remove(uid);
+            int reward = q.getRewards().length > 1
+                    ? q.getRewardForCount(correctSet.size())
+                    : q.getRewards()[0];
+            broadcastAnswer(player, q, reward,
+                    "多选题");
             return;
         }
 
-        // 只在选择题/多选题时检测蒙题
-        if (q.getType() == Question.Type.CHOICE
-                || q.getType() == Question.Type.MULTI) {
+        // ★ 多空填空题：只处理全对
+        if (q.getType() == Question.Type.FILL
+                && q.getBlankCount() > 1) {
 
-            boolean correct = isAnswerCorrect(msg, q);
+            String[] correctParts =
+                    q.getAnswer().split("[,，]");
+            String[] playerParts = msg
+                    .replaceAll("[,，\\s]+", ",")
+                    .split(",");
 
-            if (!correct) {
-                // 记录错误时间
+            int correctCount = 0;
+            for (int i = 0;
+                 i < correctParts.length
+                         && i < playerParts.length; i++) {
+                if (correctParts[i].trim().toLowerCase()
+                        .equals(playerParts[i].trim()
+                                .toLowerCase())) {
+                    correctCount++;
+                }
+            }
+
+            // ★ 全空答对才提交
+            if (correctCount >= correctParts.length) {
+                event.setCancelled(true);
+                answered.add(uid);
+                wrongTimes.remove(uid);
+                fillAnswers.remove(uid);
+
+                int reward = q.getRewards().length > 1
+                        ? q.getRewardForCount(correctCount)
+                        : q.getRewards()[0];
+                broadcastAnswer(player, q, reward,
+                        "填空题");
+                return;
+            }
+
+            // 部分答对 → 记录不提交
+            fillAnswers.put(uid, msg.trim());
+
+            // 蒙题防护
+            if (msg.matches("[\\d,，\\s]+")) {
                 recordWrong(uid);
-                // 检查是否触发罚时
                 if (shouldPunish(uid)) {
                     applyPunish(uid, player);
                 }
             }
+            return;
         }
 
+        // ★ 单选题 / 单空填空题 / 问答题
         boolean ok = false;
         int reward = 0;
-        String detail = "";
 
         switch (q.getType()) {
             case CHOICE:
                 if (checkChoice(msg, q)) {
                     ok = true;
                     reward = q.getRewardForCount(1);
-                    detail = q.getAnswer();
                 }
                 break;
-
-            case MULTI:
-                int mc =
-                        countMultiCorrect(msg, q);
-                if (mc > 0) {
-                    ok = true;
-                    reward =
-                            q.getRewardForCount(mc);
-                    detail = mc + "/"
-                            + q.getCorrectCount();
-                }
-                break;
-
             case OPEN:
-                if (msg.equalsIgnoreCase(
-                        q.getAnswer())) {
+                if (msg.equalsIgnoreCase(q.getAnswer())) {
                     ok = true;
                     reward = q.getRewardForCount(1);
-                    detail = q.getAnswer();
                 }
                 break;
-
             case FILL:
                 int[] r = checkFill(msg, q);
                 if (r[0] > 0) {
                     ok = true;
                     reward = r[1];
-                    detail = r[0] + "/"
-                            + q.getBlankCount();
                 }
                 break;
         }
 
-        if (!ok) return;
+        if (!ok) {
+            // 蒙题防护
+            if (q.getType() == Question.Type.CHOICE
+                    || q.getType() == Question.Type.FILL) {
+                recordWrong(uid);
+                if (shouldPunish(uid)) {
+                    applyPunish(uid, player);
+                }
+            }
+            return;
+        }
 
         event.setCancelled(true);
         answered.add(uid);
+        wrongTimes.remove(uid);
+        broadcastAnswer(player, q, reward,
+                q.getTypeName());
+    }
 
+
+    /** 统一广播答案 */
+    private void broadcastAnswer(Player player,
+                                 Question q,
+                                 int reward,
+                                 String typeName) {
         boolean bondOk = false;
         if (bondBridge.isHooked()) {
-            String reason = q.getTypeName() + "答对"
-                    + (q.getType()
-                    == Question.Type.FILL
-                    ? " " + detail : "");
             bondOk = bondBridge.addBonds(
-                    player.getName(), reward, reason);
+                    player.getName(), reward,
+                    typeName + "答对");
         }
 
         String info = bondOk
@@ -699,16 +1159,44 @@ public class QuizManager implements Listener {
         Bukkit.broadcastMessage(prefix
                 + "§a" + player.getName()
                 + " §7答对了§e["
-                + q.getTypeName() + "]§7!");
+                + typeName + "]§7!");
         Bukkit.broadcastMessage(prefix
-                + "§e正确答案: §a" + q.getAnswer());
+                + "§e正确答案: §a"
+                + q.getAnswer());
         Bukkit.broadcastMessage(prefix
                 + "§e赏金: " + info);
         Bukkit.broadcastMessage(prefix
                 + "§7下次出题: §e"
                 + getNextQuizTime());
-
         endQuiz(true);
+    }
+    /** 跳过当前题目 */
+    public void skipQuestion(CommandSender sender) {
+        if (!sender.hasPermission("sdf1_quiz.admin")) {
+            sender.sendMessage("§c无权限");
+            return;
+        }
+
+        if (!active) {
+            sender.sendMessage("§c当前没有答题");
+            return;
+        }
+
+        active = false;
+        cur = null;
+
+        if (countTask != null) {
+            countTask.cancel();
+            countTask = null;
+        }
+
+        sender.sendMessage("§a已跳过当前题目");
+
+        String nextTime = getNextQuizTime();
+        Bukkit.broadcastMessage(prefix
+                + "§7本轮答题已跳过");
+        Bukkit.broadcastMessage(prefix
+                + "§7下次出题: §e" + nextTime);
     }
 
     // ========== 蒙题防护 ==========
@@ -902,13 +1390,6 @@ public class QuizManager implements Listener {
         return openQ.size();
     }
 
-    public void reload() {
-        stopAuto();
-        loadQuestions();
-        firstRun = true;
-        lastQuizTime = System.currentTimeMillis();
-        startAuto();
-    }
 
 
     /**
@@ -921,6 +1402,18 @@ public class QuizManager implements Listener {
         if (!active) {
             lastQuizTime = System.currentTimeMillis();
             broadcastQuestion();
+        }
+    }
+    /** 指定题型随机出题 */
+    public void forceQuestionByType(String type) {
+        if (Bukkit.getOnlinePlayers().size() < 1) {
+            return;
+        }
+        if (!active) {
+            lastQuizTime =
+                    System.currentTimeMillis();
+            broadcastQuestion(type, 0);
+            // index=0 表示该题型内随机
         }
     }
 

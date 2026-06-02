@@ -2,17 +2,35 @@ name: Sdf1_game
 version: 1.0
 main: Sdf1_game.Main
 api-version: '1.21'
-description: 快问快答 - 自动答题赢债券
+description: 快问快答+寻宝系统
 softdepend: [Sdf1_login]
 
 commands:
   quiz:
-    description: 快问快答管理
-    usage: /quiz <reload|start|stop|test>
+    description: 快问快答
+    usage: /quiz
     permission: sdf1_quiz.admin
+    aliases: [出题]
   出题:
     description: 快问快答出题
-    usage: /出题 [选择题1]
+    usage: /出题
+    permission: sdf1_quiz.admin
+  treasure:
+    description: 寻宝管理
+    usage: /treasure
+    permission: sdf1_treasure.admin
+  寻宝:
+    description: 寻宝管理
+    usage: /寻宝
+    permission: sdf1_treasure.admin
+  跳过:
+    description: 跳过本轮答题
+    usage: /跳过
+
 permissions:
   sdf1_quiz.admin:
     default: op
+  sdf1_treasure.admin:
+    default: op
+  sdf1_treasure.open:
+    default: true
