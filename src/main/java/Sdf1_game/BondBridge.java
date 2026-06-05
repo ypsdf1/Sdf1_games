@@ -52,6 +52,34 @@ public class BondBridge {
             return false;
         }
     }
+    /** 查询玩家当前债券余额 */
+    public int getBonds(String playerName) {
+        if (!isHooked()) return 0;
+        try {
+            org.bukkit.plugin.Plugin plug =
+                    org.bukkit.Bukkit
+                            .getPluginManager()
+                            .getPlugin("Sdf1_login");
+            if (plug == null) return 0;
+
+            Object bondManager =
+                    plug.getClass()
+                            .getMethod("getBondManager")
+                            .invoke(plug);
+
+            Object result =
+                    bondManager.getClass()
+                            .getMethod("getBonds",
+                                    String.class)
+                            .invoke(bondManager,
+                                    playerName);
+
+            return (int) result;
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
 
     private Object findManager(Plugin sdf1) {
         Class<?> c = sdf1.getClass();

@@ -95,5 +95,22 @@ public class FileGenerator {
         l.add("| M.C的全称是什么？ | Mojang Studios | 10 |");
         return l;
     }
+    public static void ensureTreasureConfig(
+            File dir) {
+        dir.mkdirs();
+        File f = new File(dir, "设置.txt");
+        if (f.exists()) return;
+        try {
+            OutputStreamWriter w =
+                    new OutputStreamWriter(
+                            new FileOutputStream(f),
+                            StandardCharsets.UTF_8);
+            w.write("# 寻宝全局设置\n");
+            w.write("保底债券: 是\n");
+            w.write("随机数量: 1~3\n");
+            w.close();
+        } catch (IOException ignored) {
+        }
+    }
 
 }

@@ -59,9 +59,9 @@ public class Main extends JavaPlugin
                         new TreasureListener(
                                 this, treasureManager),
                         this);
-        spawnTask = new TreasureSpawnTask(
-                this, treasureManager)
-                .runTaskTimer(this, 600L, 600L);
+        new TreasureSpawnTask(this, treasureManager)
+                .runTaskTimer(this, 100L, 100L);
+
 
         // ★ 安全注册 Tab 补全
         if (getCommand("quiz") != null) {
@@ -81,6 +81,14 @@ public class Main extends JavaPlugin
                     .setTabCompleter(this);
         }
 
+        // ★ 启动时清除残留宝箱
+        if (treasureManager != null) {
+            treasureManager.cleanResidualChests();
+        }
+        if (treasureManager != null) {
+            treasureManager.forceCleanClaims();
+            treasureManager.cleanResidualChests();
+        }
         getLogger().info("=== Sdf1_game v1.0 ===");
         getLogger().info("债券桥接: "
                 + (bondBridge.isHooked()
@@ -118,6 +126,41 @@ public class Main extends JavaPlugin
     public void onDisable() {
         if (quizManager != null) quizManager.stopAuto();
         if (spawnTask != null) spawnTask.cancel();
+        // ★ 卸载时清除所有宝箱
+        treasureManager.cleanResidualChests();
+        treasureManager.removeAllChests();
+        treasureManager.forceCleanClaims();
+        if (treasureManager != null) {
+            treasureManager.forceCleanClaims();
+            treasureManager.cleanResidualChests();
+        }
+        saveConfig();
+    getLogger().info("\n" +
+            " __          __                             _                                                                           \n" +
+            " \\ \\        / /                            | |                                                                          \n" +
+            "  \\ \\  /\\  / /__  ___ ___  _ __ ___   ___  | |_ ___                                                                     \n" +
+            "   \\ \\/  \\/ / _ \\/ __/ _ \\| '_ ` _ \\ / _ \\ | __/ _ \\                                                                    \n" +
+            "    \\  /\\  /  __/ (_| (_) | | | | | |  __/ | || (_) |                                                                   \n" +
+            "     \\/  \\/ \\___|\\___\\___/|_| |_| |_|\\___|  \\__\\___/                _                                                   \n" +
+            "                                             | |                   (_)                                                  \n" +
+            "   ___ __ _  ___    _   _ _   _  __ _ _ __   | |_ __ _ _ __   __  ___  __ _ _ __    ___  ___ _ ____   _____ _ __        \n" +
+            "  / __/ _` |/ _ \\  | | | | | | |/ _` | '_ \\  | __/ _` | '_ \\  \\ \\/ / |/ _` | '_ \\  / __|/ _ \\ '__\\ \\ / / _ \\ '__|       \n" +
+            " | (_| (_| | (_) | | |_| | |_| | (_| | | | | | || (_| | | | |  >  <| | (_| | | | | \\__ \\  __/ |   \\ V /  __/ |          \n" +
+            "  \\___\\__,_|\\___/   \\__, |\\__,_|\\__,_|_| |_|  \\__\\__,_|_| |_|_/_/\\_\\_|\\__,_|_| |_|_|___/\\___|_| _  \\_/ \\___|_|          \n" +
+            "                     __/ |    (_)        _                 |__ \\                 | |   (_)   | (_)/ _|                  \n" +
+            "  ___  ___ _ ____   |___/ _ __ _ _ __   (_)  _ __ ___   ___   ) | _   _ _ __  ___| |__  _  __| |_| |_ _   _   ___ _ __  \n" +
+            " / __|/ _ \\ '__\\ \\ / / _ \\ '__| | '_ \\      | '_ ` _ \\ / __| / / | | | | '_ \\/ __| '_ \\| |/ _` | |  _| | | | / __| '_ \\ \n" +
+            " \\__ \\  __/ |   \\ V /  __/ |  | | |_) |  _  | | | | | | (__ / /_ | |_| | |_) \\__ \\ | | | | (_| | | | | |_| || (__| | | |\n" +
+            " |___/\\___|_|    \\_/ \\___|_|  |_| .__/  (_) |_| |_| |_|\\___|____(_)__, | .__/|___/_| |_|_|\\__,_|_|_|  \\__,_(_)___|_| |_|\n" +
+            "                                | |                                __/ | |                                              \n" +
+            "                  _     ____   _|_|   ________ ___                |___/|_|                                              \n" +
+            "                 | |  _|___ \\ / _ \\  / /____  / _ \\                                                                     \n" +
+            "  _ __   ___  ___| |_(_) __) | | | |/ /_   / / (_) |                                                                    \n" +
+            " | '_ \\ / _ \\/ __| __|  |__ <| | | | '_ \\ / / \\__, |                                                                    \n" +
+            " | |_) | (_) \\__ \\ |_ _ ___) | |_| | (_) / /    / /                                                                     \n" +
+            " | .__/ \\___/|___/\\__(_)____/ \\___/ \\___/_/    /_/                                                                      \n" +
+            " | |                                                                                                                    \n" +
+            " |_|                                                                                                                    ");
     }
 
     // ========== 命令 ==========
@@ -197,6 +240,10 @@ public class Main extends JavaPlugin
         }
 
         return false;
+    }
+
+    public TreasureManager getTreasureManager() {
+        return treasureManager;
     }
 
     // ========== 快问快答 ==========
@@ -342,8 +389,19 @@ public class Main extends JavaPlugin
                 sendTreasureList(s);
                 return true;
             case "reload":
-                treasureManager.loadAll();
-                s.sendMessage("§a已重载");
+            case "重载":
+                treasureManager.forceCleanClaims();
+                for (org.bukkit.entity.Player p :
+                        Bukkit.getOnlinePlayers()) {
+                    treasureManager
+                            .reclaimAllTreasureItems(p);
+                }
+                treasureManager.reload();
+                s.sendMessage(
+                        "§a[寻宝] 重载完成，领取记录已清空");
+                s.sendMessage("§b§l\n欢迎游玩草原探险服务器");
+                s.sendMessage("§b§l服务器ip：mc2.ypshidifu.cn\n端口30679");
+                s.sendMessage("");
                 return true;
             case "工具":
             case "tool":
@@ -359,6 +417,9 @@ public class Main extends JavaPlugin
                 }
                 treasureManager.removeRegion(a[1]);
                 s.sendMessage("§a已删除: " + a[1]);
+                s.sendMessage("§b§l\n欢迎游玩草原探险服务器");
+                s.sendMessage("§b§l服务器ip：mc2.ypshidifu.cn\n端口30679");
+                s.sendMessage("");
                 return true;
             // ★ on/off 代替 border
             case "on":
@@ -394,6 +455,9 @@ public class Main extends JavaPlugin
                     .containsKey(regionName)) {
                 s.sendMessage("§c区域不存在: "
                         + regionName);
+                s.sendMessage("§b§l\n欢迎游玩草原探险服务器");
+                s.sendMessage("§b§l服务器ip：mc2.ypshidifu.cn\n端口30679");
+                s.sendMessage("");
                 return true;
             }
 
@@ -426,6 +490,9 @@ public class Main extends JavaPlugin
         if (tr.getPos1() == null) {
             s.sendMessage("§c请先获取工具并设置AB点");
             s.sendMessage("§7或: /寻宝 on 区域名");
+            s.sendMessage("§b§l\n欢迎游玩草原探险服务器");
+            s.sendMessage("§b§l服务器ip：mc2.ypshidifu.cn\n端口30679");
+            s.sendMessage("");
             return true;
         }
 
@@ -456,6 +523,9 @@ public class Main extends JavaPlugin
         TreasureRegion.giveTool((Player) s);
         s.sendMessage("§a已获得圈地工具");
         s.sendMessage("§7左键=A点 右键=B点");
+        s.sendMessage("§b§l\n欢迎游玩草原探险服务器");
+        s.sendMessage("§b§l服务器ip：mc2.ypshidifu.cn\n端口30679");
+        s.sendMessage("");
         return true;
     }
 
@@ -605,6 +675,9 @@ public class Main extends JavaPlugin
                     + hMin + "~Y" + hMax);
             s.sendMessage("§7使用 §e/寻宝 off "
                     + name + " §7关闭边框");
+            s.sendMessage("§b§l\n欢迎游玩草原探险服务器");
+            s.sendMessage("§b§l服务器ip：mc2.ypshidifu.cn\n端口30679");
+            s.sendMessage("");
         }
 
         boolean o1k = treasureManager.saveRegion(

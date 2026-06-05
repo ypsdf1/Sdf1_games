@@ -1,32 +1,26 @@
 package Sdf1_game;
 
-import net.kyori.adventure.text.Component;
-import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
-import org.bukkit.enchantments.Enchantment;
-import org.bukkit.inventory.ItemFlag;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.ItemMeta;
-
-import java.util.ArrayList;
-import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class TreasureReward {
 
     public enum Type {
-        ITEM, BOND, COMMAND
+        BOND, COMMAND, ITEM
     }
 
-    private final Type type;
-    private final String materialName;
-    private final int amount;
-    private final int bondAmount;
-    private final String command;
-    private final int weight;
-    private final String displayName;
-    private final int durationSec;
-    private final String enchant;
-    private final String rewardLore;
+    private Type type;
+    private String materialName;
+    private int amount;
+    private int bondAmount;
+    private int bondMin;
+    private int bondMax;
+    private String command;
+    private int weight;
+    private String displayName;
+    private int durationSec;
+    private String enchant;
+    private String rewardLore;
+    private int attackUsesLimit;
 
     public TreasureReward(Type type,
                           String materialName,
@@ -37,112 +31,94 @@ public class TreasureReward {
                           String displayName,
                           int durationSec,
                           String enchant,
-                          String rewardLore) {
+                          String lore,
+                          int attackUsesLimit) {
         this.type = type;
         this.materialName = materialName;
-        this.amount = Math.max(1, amount);
+        this.amount = amount;
         this.bondAmount = bondAmount;
+        this.bondMin = bondAmount;
+        this.bondMax = bondAmount;
         this.command = command;
         this.weight = weight;
         this.displayName = displayName;
         this.durationSec = durationSec;
         this.enchant = enchant;
-        this.rewardLore = rewardLore;
+        this.rewardLore = lore;
+        this.attackUsesLimit = attackUsesLimit;
     }
 
     public TreasureReward(Type type,
-                          String materialName,
-                          int amount,
-                          int bondAmount,
-                          String command,
-                          int weight,
-                          String displayName) {
-        this(type, materialName, amount, bondAmount,
-                command, weight, displayName,
-                0, null, null);
+                          String mat, int amt,
+                          int bond, String cmd,
+                          int w, String name) {
+        this(type, mat, amt, bond, cmd, w, name,
+                0, null, null, 0);
+    }
+
+    public TreasureReward(Type type,
+                          String mat, int amt,
+                          int bond, String cmd,
+                          int w, String name,
+                          int dur, String ench,
+                          String lore) {
+        this(type, mat, amt, bond, cmd, w, name,
+                dur, ench, lore, 0);
     }
 
     public Type getType() { return type; }
     public String getMaterialName() { return materialName; }
     public int getAmount() { return amount; }
     public int getBondAmount() { return bondAmount; }
+    public int getBondMin() { return bondMin; }
+    public int getBondMax() { return bondMax; }
     public String getCommand() { return command; }
     public int getWeight() { return weight; }
     public String getDisplayName() { return displayName; }
     public int getDurationSec() { return durationSec; }
     public String getEnchant() { return enchant; }
+    public String getLore() { return rewardLore; }
+    public int getAttackUsesLimit() { return attackUsesLimit; }
 
-    public ItemStack toItemStack() {
-        Material mat = Material.PAPER;
-        if (materialName != null
-                && !materialName.isEmpty()) {
-            Material found =
-                    Material.matchMaterial(materialName);
-            if (found != null) mat = found;
-        }
-
-        ItemStack item = new ItemStack(mat, amount);
-        ItemMeta meta = item.getItemMeta();
-        if (meta != null) {
-            meta.displayName(
-                    Component.text(displayName));
-
-            List<Component> lore = new ArrayList<>();
-            if (durationSec > 0) {
-                lore.add(Component.text(
-                        "§7时限: " + formatTime(durationSec)));
-            }
-            if (rewardLore != null
-                    && !rewardLore.isEmpty()) {
-                lore.add(Component.text(rewardLore));
-            }
-            lore.add(Component.text("§7点击领取"));
-            meta.lore(lore);
-
-            applyEnchant(meta, enchant);
-
-            item.setItemMeta(meta);
-        }
-        return item;
+    public void setBondRange(int min, int max) {
+        this.bondMin = min;
+        this.bondMax = max;
+        this.bondAmount = min;
     }
 
-    /** ★ 安全附魔：用 NamespacedKey */
-    static void applyEnchant(ItemMeta meta,
-                             String enchant) {
-        if (enchant == null || enchant.isEmpty())
-            return;
-        String[] ep = enchant.split(",");
-        if (ep.length != 2) return;
-        try {
-            // 支持 "KNOCKBACK" 或 "minecraft:knockback"
-            String key = ep[0].trim();
-            if (!key.contains(":")) {
-                key = "minecraft:" + key.toLowerCase();
-            }
-            NamespacedKey nk =
-                    NamespacedKey.fromString(key);
-            if (nk == null) return;
-            Enchantment ench =
-                    Enchantment.getByKey(nk);
-            if (ench == null) return;
-            int lvl = Integer.parseInt(ep[1].trim());
-            meta.addEnchant(ench, lvl, true);
-            meta.addItemFlags(
-                    ItemFlag.HIDE_ENCHANTS);
-        } catch (Exception ignored) {
-        }
+    public int rollBondAmount() {
+        if (bondMax <= bondMin) return bondMin;
+        return ThreadLocalRandom.current()
+                .nextInt(bondMin, bondMax + 1);
     }
 
-    static String formatTime(int sec) {
-        if (sec >= 3600) {
-            int h = sec / 3600;
-            int m = (sec % 3600) / 60;
-            return m > 0 ? h + "小时" + m + "分钟"
-                    : h + "小时";
+    public static String formatTime(int s) {
+        if (s <= 0) return "永久";
+        int h = s / 3600;
+        int m = (s % 3600) / 60;
+        int sec = s % 60;
+        if (h > 0) return h + "小时" + m + "分钟";
+        if (m > 0) return m + "分钟" + sec + "秒";
+        return sec + "秒";
+    }
+
+    public static int parseDuration(String input) {
+        if (input == null || input.isEmpty()) return 0;
+        String s = input.trim().toLowerCase();
+        if (s.matches("\\d+")) return Integer.parseInt(s);
+        if (s.contains("小时") || s.contains("时")) {
+            return Integer.parseInt(s.replaceAll("[^\\d]", "")) * 3600;
         }
-        int m = sec / 60;
-        int s = sec % 60;
-        return s > 0 ? m + "分钟" + s + "秒"
-                : m + "分钟";
+        if (s.contains("分钟") || s.contains("分")) {
+            return Integer.parseInt(s.replaceAll("[^\\d]", "")) * 60;
+        }
+        if (s.contains("秒")) {
+            return Integer.parseInt(s.replaceAll("[^\\d]", ""));
+        }
+        if (s.contains("天")) {
+            return Integer.parseInt(s.replaceAll("[^\\d]", "")) * 86400;
+        }
+        try { return Integer.parseInt(s); }
+        catch (Exception e) { return 0; }
     }
 }
