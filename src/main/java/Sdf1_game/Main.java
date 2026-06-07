@@ -23,6 +23,7 @@ public class Main extends JavaPlugin
     private QuizManager quizManager;
     private TreasureManager treasureManager;
     private BukkitTask spawnTask;
+    private UpdateChecker updateChecker;
 
     private static final Pattern SPEC_NUM =
             Pattern.compile(
@@ -89,6 +90,11 @@ public class Main extends JavaPlugin
             treasureManager.forceCleanClaims();
             treasureManager.cleanResidualChests();
         }
+
+        // ★ 启动时异步检查更新（GitHub/Gitee双通道）
+        updateChecker = new UpdateChecker(this);
+        updateChecker.checkOnEnable();
+
         getLogger().info("=== Sdf1_game v1.0 ===");
         getLogger().info("债券桥接: "
                 + (bondBridge.isHooked()
@@ -134,7 +140,11 @@ public class Main extends JavaPlugin
             treasureManager.forceCleanClaims();
             treasureManager.cleanResidualChests();
         }
-        saveConfig();
+        // 仅在config.yml已存在时才保存（防止自动创建空白文件）
+        if (new File(getDataFolder(), "config.yml").exists()) {
+            saveConfig();
+        }
+
     getLogger().info("\n" +
             " __          __                             _                                                                           \n" +
             " \\ \\        / /                            | |                                                                          \n" +
@@ -213,6 +223,12 @@ public class Main extends JavaPlugin
                 case "test":
                     sender.sendMessage(bondBridge.isHooked()
                             ? "§a已连接" : "§c未连接");
+                    return true;
+                case "update":
+                    if (updateChecker == null) {
+                        updateChecker = new UpdateChecker(this);
+                    }
+                    updateChecker.checkUpdate(sender);
                     return true;
                 default:
                     sendQuizHelp(sender);
@@ -427,6 +443,35 @@ public class Main extends JavaPlugin
             case "off":
             case "关闭":
                 return handleBorder(s, a);
+            case "public":
+            case "公布":
+                // /寻宝 public → 公布全部最旧1个
+                // /寻宝 public 主城区 → 公布指定区域
+                String announceRegion = null;
+                if (a.length >= 2) {
+                    announceRegion = a[1];
+                }
+                boolean ok = treasureManager
+                        .announceChest(
+                                announceRegion);
+                if (ok) {
+                    s.sendMessage(
+                            "§a[寻宝] 已公布宝箱坐标");
+                } else {
+                    s.sendMessage(
+                            "§c[寻宝] 当前没有"
+                                    + (announceRegion != null
+                                    ? "该区域的" : "")
+                                    + "宝箱");
+                }
+                return true;
+            case "update":
+                if (updateChecker == null) {
+                    updateChecker = new UpdateChecker(this);
+                }
+                updateChecker.checkUpdate(s);
+                return true;
+
             default:
                 return handleSetName(s, a);
         }
@@ -650,7 +695,6 @@ public class Main extends JavaPlugin
                 p2.getBlockZ()) - ex;
         int maxZ = Math.max(p1.getBlockZ(),
                 p2.getBlockZ()) + ex;
-        // ★ 高度范围 = A/B点Y中较小的~较大的
         int y1 = p1.getBlockY();
         int y2 = p2.getBlockY();
         int hMin = Math.min(y1, y2);
@@ -675,28 +719,6 @@ public class Main extends JavaPlugin
                     + hMin + "~Y" + hMax);
             s.sendMessage("§7使用 §e/寻宝 off "
                     + name + " §7关闭边框");
-            s.sendMessage("§b§l\n欢迎游玩草原探险服务器");
-            s.sendMessage("§b§l服务器ip：mc2.ypshidifu.cn\n端口30679");
-            s.sendMessage("");
-        }
-
-        boolean o1k = treasureManager.saveRegion(
-                name,
-                p1.getWorld().getName(),
-                minX, minZ, maxX, maxZ,
-                hMin, hMax);
-
-        if (ok) {
-            tr.reset();
-            s.sendMessage("§a区域「" + name
-                    + "」已创建!");
-            s.sendMessage("§7范围: ["
-                    + minX + "," + minZ + "] ~ ["
-                    + maxX + "," + maxZ + "]");
-            s.sendMessage("§7使用 §e/寻宝 expand "
-                    + name + " §7扩展");
-            s.sendMessage("§7使用 §e/寻宝 return "
-                    + name + " §7收缩");
         } else {
             s.sendMessage("§c创建失败");
         }
@@ -748,6 +770,11 @@ public class Main extends JavaPlugin
         return bondBridge;
     }
 
+    // ★ 供集群更新调用
+    public UpdateChecker getUpdateChecker() {
+        return updateChecker;
+    }
+
     // ========== Tab ==========
 
     @Override
@@ -764,7 +791,7 @@ public class Main extends JavaPlugin
             String in = a[0].toLowerCase();
             for (String x : Arrays.asList(
                     "start", "stop", "reload",
-                    "test", "info", "skip")) {
+                    "test", "info", "skip", "update")) {
                 if (x.startsWith(in)) r.add(x);
             }
         return r;
@@ -812,7 +839,8 @@ public class Main extends JavaPlugin
                     "info", "list", "reload",
                     "工具", "expand", "return",
                     "on", "off", "开启", "关闭",
-                    "removeregion")) {
+                    "removeregion",
+                    "public", "公布", "update")) {
                 if (x.startsWith(in)) r.add(x);
             }
             return r;
@@ -825,7 +853,9 @@ public class Main extends JavaPlugin
                     || sub.equals("关闭")
                     || sub.equals("expand")
                     || sub.equals("return")
-                    || sub.equals("removeregion")) {
+                    || sub.equals("removeregion")
+                    || sub.equals("public")
+                    || sub.equals("公布")) {
                 String in = a[1].toLowerCase();
                 for (String n :
                         treasureManager.getRegionNames()) {
@@ -835,7 +865,6 @@ public class Main extends JavaPlugin
                 return r;
             }
         }
-
 
         if (isT && a.length == 2) {
             String sub = a[0].toLowerCase();
@@ -852,13 +881,11 @@ public class Main extends JavaPlugin
             }
         }
 
-
         if (isT && a.length == 2
                 && a[0].equalsIgnoreCase("expand")) {
-            // 不补全，让玩家自己输数字
             return r;
         }
-// 打了包但还没测试。可以先测试，也可以先做return的功能要求。要先把大服务器开起来
+
         if (isT && a.length == 2
                 && a[0].equalsIgnoreCase(
                 "removeregion")) {
@@ -870,7 +897,6 @@ public class Main extends JavaPlugin
             }
             return r;
         }
-
 
 
         return r;

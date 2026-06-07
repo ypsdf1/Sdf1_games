@@ -7,6 +7,8 @@ import java.io.OutputStreamWriter;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import org.bukkit.Location;
+
 
 public class TreasureConfig {
 
@@ -33,7 +35,10 @@ public class TreasureConfig {
     // ★ 中文名映射：奖励索引→显示名
     public java.util.Map<Integer, String>
             rewardNames = new java.util.LinkedHashMap<>();
-
+    // ★ 刷新相关
+    public int refreshBondCost = 150;
+    public int refreshMinRewards = 3;
+    public int refreshTimes = 1;
 
 
     public TreasureConfig(String name) {

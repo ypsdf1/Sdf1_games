@@ -1,5 +1,5 @@
 name: Sdf1_game
-version: 1.0
+version: 1.4
 main: Sdf1_game.Main
 api-version: '1.21'
 description: 快问快答+寻宝系统

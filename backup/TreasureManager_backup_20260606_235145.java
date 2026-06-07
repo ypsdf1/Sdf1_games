@@ -155,7 +155,7 @@ public class TreasureManager {
                     reclaimPlayerItems(p.getName());
                 }
             }
-        }.runTaskTimer(plugin, 20L, 20L); // 1秒
+        }.runTaskTimer(plugin, 40L, 40L); // 2秒
         initItemMap();
         loadClaims();
 
@@ -231,28 +231,21 @@ public class TreasureManager {
         }
     }
     public void reload() {
-        // ★ 先清内存
-        claimDb.clear();
-        saveClaims();  // 写空文件
-
-        // 清除玩家背包里的自定义物品
+        forceCleanClaims();
         for (org.bukkit.entity.Player p :
                 plugin.getServer()
                         .getOnlinePlayers()) {
-            reclaimPlayerItems(p.getName());
+            reclaimAllTreasureItems(p);
         }
-
         removeAllChests();
         configs.clear();
         activeChests.clear();
         refreshedChests.clear();
         loadAll();
-
         plugin.getLogger().info(
-                "[寻宝] ★重载完成，领取记录已清空，"
+                "[寻宝] ★重载完成，"
                         + configs.size() + " 个区域");
     }
-
 
     // ★ 玩家寻宝临时数据
     private final Map<String, TreasureData>
@@ -408,7 +401,7 @@ public class TreasureManager {
                                     + tc.name
                                     + " 奖励数量="
                                     + tc.rewards.size());
-              /*      for (int i = 0;
+                    for (int i = 0;
                          i < tc.rewards.size(); i++) {
                         TreasureReward r =
                                 tc.rewards.get(i);
@@ -424,7 +417,7 @@ public class TreasureManager {
                                         + r.getWeight()
                                         + " 名="
                                         + r.getDisplayName());
-                    }*/
+                    }
                     loadSettings(tc);
                 }
             } catch (Exception e) {
@@ -620,11 +613,10 @@ public class TreasureManager {
     public boolean isClaimed(String player,
                              String itemName,
                              String regionName) {
-        String key = player + "."
-                + itemName + "." + regionName;
+        String key = player + "." + itemName
+                + "." + regionName;
         return claimDb.containsKey(key);
     }
-
 
     /** ★ 统一标点：中文→英文 */
     private String normalizePunctuation(String s) {
@@ -703,9 +695,9 @@ public class TreasureManager {
             String k = line.substring(0, ci).trim();
             String v = line.substring(ci + 1).trim();
 
-         /*   plugin.getLogger().info(
+            plugin.getLogger().info(
                     "[寻宝] key=[" + k
-                            + "] val=[" + v + "]");*/
+                            + "] val=[" + v + "]");
 
             switch (k) {
                 case "区域名":
@@ -920,42 +912,6 @@ public class TreasureManager {
         claimedSet.clear();
     }
 
-    /**
-     * 清空指定玩家的所有领取记录（限时物品+寻宝物品）
-     * @param playerName 玩家名
-     * @return 清除的记录数量
-     */
-    public int clearPlayerAllClaims(String playerName) {
-        int count = 0;
-        
-        // 1. 清除限时物品领取记录 (claimDb) - key格式: 玩家名.物品名.区域名
-        Iterator<Map.Entry<String, Boolean>> claimDbIterator = claimDb.entrySet().iterator();
-        while (claimDbIterator.hasNext()) {
-            Map.Entry<String, Boolean> entry = claimDbIterator.next();
-            if (entry.getKey().startsWith(playerName + ".")) {
-                claimDbIterator.remove();
-                count++;
-            }
-        }
-        
-        // 2. 清除寻宝物品领取记录 (claimedSet) - key格式: 玩家名|物品名|区域名
-        Iterator<String> claimedSetIterator = claimedSet.iterator();
-        while (claimedSetIterator.hasNext()) {
-            String key = claimedSetIterator.next();
-            if (key.startsWith(playerName + "|")) {
-                claimedSetIterator.remove();
-                count++;
-            }
-        }
-        
-        // 3. 保存更改到文件
-        if (count > 0) {
-            saveClaims();
-            rewriteClaimsFile();
-        }
-        
-        return count;
-    }
 
     // ===== NBT 标记宝箱 =====
 
@@ -1543,13 +1499,13 @@ public class TreasureManager {
                     atm.group(1));
         }
 
-   /*    plugin.getLogger().info(
+        plugin.getLogger().info(
                 "[寻宝] ★结果: "
                         + matName + " x" + amount
                         + " 附魔=" + enchant
                         + " 时长=" + duration
                         + " 攻击=" + attackLimit);
-*/
+
         return new TreasureReward(
                 TreasureReward.Type.ITEM,
                 matName, amount, 0, null, 10,
@@ -2076,8 +2032,8 @@ public class TreasureManager {
         // ★ 只转冒号，不动逗号
         line = line.replace('\uff1a', ':');
 
-    /*    plugin.getLogger().info(
-                "[寻宝] 解析奖励: " + line);*/
+        plugin.getLogger().info(
+                "[寻宝] 解析奖励: " + line);
 
         if (line.charAt(0) == '\uFEFF')
             line = line.substring(1);

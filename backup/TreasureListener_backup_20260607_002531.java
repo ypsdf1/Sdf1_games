@@ -10,7 +10,6 @@ import org.bukkit.event.EventHandler;
 import org.bukkit.event.Listener;
 import org.bukkit.event.block.Action;
 import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.block.BlockPlaceEvent;
 import org.bukkit.event.inventory.InventoryClickEvent;
 import org.bukkit.event.inventory.InventoryType;
 import org.bukkit.event.player.PlayerInteractEvent;
@@ -476,8 +475,8 @@ public class TreasureListener implements Listener {
         // ========== 4. 确认是容器 ==========
         InventoryType topType = e.getView()
                 .getTopInventory().getType();
-        // 只放行玩家背包和创造模式背包，其他所有容器都拦截
         if (topType == InventoryType.PLAYER
+                || topType == InventoryType.CRAFTING
                 || topType == InventoryType.CREATIVE) {
             return;
         }
@@ -645,8 +644,8 @@ public class TreasureListener implements Listener {
         // ★ 通用容器拖拽拦截
         InventoryType type = e.getView()
                 .getTopInventory().getType();
-        // 只放行玩家背包和创造模式背包，其他所有容器都拦截
         if (type != InventoryType.PLAYER
+                && type != InventoryType.CRAFTING
                 && type != InventoryType.CREATIVE) {
             for (ItemStack item :
                     e.getNewItems().values()) {
@@ -679,21 +678,15 @@ public class TreasureListener implements Listener {
     }
 
 
-    // ★ 右键容器拦截（HIGHEST 优先级）
+    // ★ 右键容器拦截
     @org.bukkit.event.EventHandler(priority =
             org.bukkit.event.EventPriority.HIGHEST)
     public void onInteract(
             org.bukkit.event.player
                     .PlayerInteractEvent e) {
-        // ★ 双重获取物品：e.getItem() + 主手后备
-        ItemStack held = e.getItem();
-        if (held == null || held.getType() == org.bukkit.Material.AIR) {
-            held = e.getPlayer().getInventory()
-                    .getItemInMainHand();
-        }
-        if (held == null || held.getType() == org.bukkit.Material.AIR) return;
+        if (e.getItem() == null) return;
         if (!TreasureInventory
-                .isCustomItem(held)) return;
+                .isCustomItem(e.getItem())) return;
         if (!e.getAction().name()
                 .contains("RIGHT_CLICK")) return;
         if (e.getClickedBlock() == null) return;
@@ -705,26 +698,11 @@ public class TreasureListener implements Listener {
                 || bt.equals("ENDER_CHEST")
                 || bt.equals("HOPPER")
                 || bt.equals("DROPPER")
-                || bt.equals("DISPENSER")
-                || bt.equals("DECORATED_POT")
-                || bt.contains("SHELF")) {
+                || bt.equals("DISPENSER")) {
             e.setCancelled(true);
-            e.setUseItemInHand(
-                    org.bukkit.event.Event.Result.DENY);
             e.getPlayer().sendMessage(
                     "§c[寻宝] 不可放入容器");
         }
-    }
-    // ★ 方块放置拦截 - 防止手持宝箱物品放置方块
-    @org.bukkit.event.EventHandler(priority =
-            org.bukkit.event.EventPriority.HIGHEST)
-    public void onBlockPlace(BlockPlaceEvent e) {
-        ItemStack held = e.getItemInHand();
-        if (held == null || held.getType() == Material.AIR) return;
-        if (!TreasureInventory.isCustomItem(held)) return;
-        e.setCancelled(true);
-        e.getPlayer().sendMessage(
-                "§c[寻宝] 不可使用此物品放置方块");
     }
     // ★ 上线时扫描背包回收
     @org.bukkit.event.EventHandler
@@ -802,120 +780,5 @@ public class TreasureListener implements Listener {
                 + "§7调整");
         p.sendMessage("§7输入 §e/寻宝 区域名 "
                 + "§7保存");
-    }
-
-    // ★ 传送门拦截 - 物品通过末地传送门/下界传送门时自动销毁
-    @org.bukkit.event.EventHandler(priority =
-            org.bukkit.event.EventPriority.HIGHEST)
-    public void onPortal(org.bukkit.event.player.PlayerPortalEvent e) {
-        Player p = e.getPlayer();
-        // 检查玩家背包中的宝箱物品
-        for (ItemStack item : p.getInventory().getContents()) {
-            if (item != null
-                    && TreasureInventory.isCustomItem(item)) {
-                // 销毁宝箱物品
-                item.setAmount(0);
-                p.sendMessage("§c[寻宝] 宝箱物品在传送时已自动销毁");
-            }
-        }
-        // 检查副手
-        ItemStack offhand = p.getInventory().getItemInOffHand();
-        if (offhand != null
-                && TreasureInventory.isCustomItem(offhand)) {
-            offhand.setAmount(0);
-            p.sendMessage("§c[寻宝] 宝箱物品在传送时已自动销毁");
-        }
-    }
-
-    // ★ 实体传送拦截 - 驴箱子、运输船等实体传送
-    @org.bukkit.event.EventHandler(priority =
-            org.bukkit.event.EventPriority.HIGHEST)
-    public void onEntityPortal(org.bukkit.event.entity.EntityPortalEvent e) {
-        // 检查实体是否携带宝箱物品（如驴箱子、运输船）
-        if (e.getEntity() instanceof org.bukkit.entity.AnimalTamer) {
-            // 这里可以添加更多实体类型的检查
-        }
-        
-        // 检查驴箱子、骡子、羊驼等可骑乘实体
-        if (e.getEntity() instanceof org.bukkit.entity.AbstractHorse) {
-            org.bukkit.entity.AbstractHorse horse = (org.bukkit.entity.AbstractHorse) e.getEntity();
-            // 检查马鞍和装备
-            ItemStack saddle = horse.getInventory().getItem(0);
-            if (saddle != null && TreasureInventory.isCustomItem(saddle)) {
-                saddle.setAmount(0);
-                // 通知附近的玩家
-                for (Player p : horse.getWorld().getPlayers()) {
-                    if (p.getLocation().distance(horse.getLocation()) < 32) {
-                        p.sendMessage("§c[寻宝] 驴箱子中的宝箱物品在传送时已自动销毁");
-                    }
-                }
-            }
-        }
-        
-        // 检查运输船（如果有相关API）
-        // 注意：Bukkit API可能不直接支持运输船的物品检查
-    }
-
-    // ★ 漏斗拦截 - 防止宝箱物品通过漏斗传输
-    @org.bukkit.event.EventHandler(priority =
-            org.bukkit.event.EventPriority.HIGHEST)
-    public void onInventoryMoveItem(org.bukkit.event.inventory.InventoryMoveItemEvent e) {
-        ItemStack item = e.getItem();
-        if (item != null && TreasureInventory.isCustomItem(item)) {
-            // 检查目标容器类型
-            InventoryType destinationType = e.getDestination().getType();
-            // 只放行玩家背包，其他所有容器都拦截
-            if (destinationType != InventoryType.PLAYER
-                    && destinationType != InventoryType.CREATIVE) {
-                e.setCancelled(true);
-                // 将物品弹出到世界
-                Location loc = e.getSource().getLocation();
-                if (loc != null) {
-                    loc.getWorld().dropItemNaturally(loc, item.clone());
-                    item.setAmount(0);
-                }
-            }
-        }
-    }
-
-    // ★ 展示框拦截 - 防止宝箱物品放入展示框
-    @org.bukkit.event.EventHandler(priority =
-            org.bukkit.event.EventPriority.HIGHEST)
-    public void onPlayerInteractEntity(org.bukkit.event.player.PlayerInteractEntityEvent e) {
-        if (!(e.getRightClicked() instanceof org.bukkit.entity.ItemFrame)) return;
-        Player p = e.getPlayer();
-        ItemStack item = p.getInventory().getItemInMainHand();
-        if (item != null && TreasureInventory.isCustomItem(item)) {
-            e.setCancelled(true);
-            p.sendMessage("§c[寻宝] 宝箱物品不可放入展示框");
-        }
-    }
-
-    // ★ 打开容器时检查 - 防止宝箱物品通过其他方式进入容器
-    @org.bukkit.event.EventHandler(priority =
-            org.bukkit.event.EventPriority.HIGHEST)
-    public void onInventoryOpen(org.bukkit.event.inventory.InventoryOpenEvent e) {
-        if (!(e.getPlayer() instanceof Player)) return;
-        Player p = (Player) e.getPlayer();
-        InventoryType type = e.getInventory().getType();
-        
-        // 只检查容器类型，不检查玩家背包
-        if (type == InventoryType.PLAYER
-                || type == InventoryType.CREATIVE) {
-            return;
-        }
-        
-        // 检查容器中是否已有宝箱物品
-        for (ItemStack item : e.getInventory().getContents()) {
-            if (item != null && TreasureInventory.isCustomItem(item)) {
-                // 移除宝箱物品并弹出到世界
-                Location loc = e.getInventory().getLocation();
-                if (loc != null) {
-                    loc.getWorld().dropItemNaturally(loc, item.clone());
-                }
-                item.setAmount(0);
-                p.sendMessage("§c[寻宝] 容器中的宝箱物品已被清除");
-            }
-        }
     }
 }

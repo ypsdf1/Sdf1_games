@@ -63,6 +63,9 @@ public class FileGenerator {
         l.add("罚时结束提示: §a罚时已结束");
         l.add("# 消息前缀");
         l.add("消息前缀: §e§l【快问快答】§r");
+        l.add("# 欢迎游玩草原探险服务器 ");
+        l.add("# 服务器ip：mc2.ypshidifu.cn");
+        l.add("# 端口：30679,Java版免输入");
         return l;
     }
 
@@ -95,6 +98,7 @@ public class FileGenerator {
         l.add("| M.C的全称是什么？ | Mojang Studios | 10 |");
         return l;
     }
+
     public static void ensureTreasureConfig(
             File dir) {
         dir.mkdirs();
@@ -106,11 +110,21 @@ public class FileGenerator {
                             new FileOutputStream(f),
                             StandardCharsets.UTF_8);
             w.write("# 寻宝全局设置\n");
+            w.write("# 保底债券: 是/否\n");
             w.write("保底债券: 是\n");
+            w.write("# 随机奖励数量范围\n");
             w.write("随机数量: 1~3\n");
+            w.write("# 刷新费用(债券)\n");
+            w.write("刷新费用: 150\n");
+            w.write("# 刷新最低奖励数\n");
+            w.write("刷新最低奖励: 3\n");
+            w.write("# 刷新次数(每个宝箱)\n");
+            w.write("刷新次数: 1\n");
+            w.write("# 欢迎游玩草原探险服务器");
+            w.write("# 服务器ip：mc2.ypshidifu.cn");
+            w.write("# 端口号30679，Java免输入");
             w.close();
         } catch (IOException ignored) {
         }
     }
-
 }

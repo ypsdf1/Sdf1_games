@@ -11,6 +11,7 @@ public class TreasureSpawnTask extends BukkitRunnable {
     private final TreasureManager manager;
     private int offlineCount = 0;
     private boolean paused = false;
+    private boolean forceNextSpawn = false;
 
     public TreasureSpawnTask(Main plugin,
                              TreasureManager manager) {
@@ -41,8 +42,9 @@ public class TreasureSpawnTask extends BukkitRunnable {
 
         if (paused) {
             paused = false;
+            forceNextSpawn = true;
             plugin.getLogger().info(
-                    "[寻宝] ★玩家上线");
+                    "[寻宝] ★玩家上线，下次生成100%");
         }
 
         offlineCount = 0;
@@ -65,6 +67,16 @@ public class TreasureSpawnTask extends BukkitRunnable {
             long need = tc.spawnInterval * 1000L;
             if (elapsed < need) continue;
 
+            // ★ 暂停恢复后首次生成：100%生成
+            if (forceNextSpawn) {
+                forceNextSpawn = false;
+                manager.spawnChest(tc);
+                tc.lastSpawnTime = now;
+                broadcastSpawn(tc);
+                continue;
+            }
+
+            // 按配置概率判定
             int roll = ThreadLocalRandom.current()
                     .nextInt(1, 101);
             if (roll > tc.spawnChance) {
@@ -76,8 +88,6 @@ public class TreasureSpawnTask extends BukkitRunnable {
             tc.lastSpawnTime = now;
             // ★ 通知所有玩家
             broadcastSpawn(tc);
-            plugin.getLogger().info(
-                    "[寻宝] ★生成: " + tc.name);
         }
     }
     private void broadcastSpawn(TreasureConfig tc) {
