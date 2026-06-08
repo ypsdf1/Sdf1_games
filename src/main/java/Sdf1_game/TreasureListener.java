@@ -476,9 +476,10 @@ public class TreasureListener implements Listener {
         // ========== 4. 确认是容器 ==========
         InventoryType topType = e.getView()
                 .getTopInventory().getType();
-        // 只放行玩家背包和创造模式背包，其他所有容器都拦截
+        // 只放行玩家背包、创造模式背包和玩家合成背包，其他所有容器都拦截
         if (topType == InventoryType.PLAYER
-                || topType == InventoryType.CREATIVE) {
+                || topType == InventoryType.CREATIVE
+                || topType == InventoryType.CRAFTING) {
             return;
         }
 

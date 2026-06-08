@@ -210,6 +210,7 @@ public class TreasureManager {
     /** 加载领取记录 */
     private void loadClaims() {
         claimedSet.clear();
+        claimDb.clear();
         if (!claimFile.exists()) return;
         try {
             BufferedReader br = new BufferedReader(
@@ -219,9 +220,14 @@ public class TreasureManager {
             String line;
             while ((line = br.readLine()) != null) {
                 line = line.trim();
-                if (!line.isEmpty()
-                        && !line.startsWith("#")) {
+                if (line.isEmpty() || line.startsWith("#"))
+                    continue;
+                if (line.contains("|")) {
+                    // claimedSet 格式: 玩家|物品|区域
                     claimedSet.add(line);
+                } else if (line.contains(".")) {
+                    // claimDb 格式: 玩家.物品.区域
+                    claimDb.put(line, true);
                 }
             }
             br.close();
@@ -231,9 +237,8 @@ public class TreasureManager {
         }
     }
     public void reload() {
-        // ★ 先清内存
-        claimDb.clear();
-        saveClaims();  // 写空文件
+        // ★ 先销毁领取记录文件并清空所有内存
+        forceCleanClaims();
 
         // 清除玩家背包里的自定义物品
         for (org.bukkit.entity.Player p :
@@ -546,11 +551,12 @@ public class TreasureManager {
             }
 
             // ★ 检查2: 无领取记录→视为过期
-            if (!shouldRemove
-                    && !isClaimed(playerName,
-                    rName, region)) {
-                shouldRemove = true;
-                reason = "无领取记录（过期/重载）";
+            // 宝箱物品（区域名含"宝箱"）不需要领取限制
+            if (!shouldRemove && !isTreasureItem(playerName, region)) {
+                if (!isClaimed(playerName, rName, region)) {
+                    shouldRemove = true;
+                    reason = "无领取记录（过期/重载）";
+                }
             }
 
             // 检查3: 已过期
@@ -620,9 +626,21 @@ public class TreasureManager {
     public boolean isClaimed(String player,
                              String itemName,
                              String regionName) {
-        String key = player + "."
-                + itemName + "." + regionName;
-        return claimDb.containsKey(key);
+        // ★ 检查claimDb（限时物品）
+        String key = player + "." + itemName + "." + regionName;
+        if (claimDb.containsKey(key)) return true;
+        
+        // ★ 检查claimedSet（寻宝物品/宝箱物品）
+        String key2 = player + "|" + itemName + "|" + regionName;
+        return claimedSet.contains(key2);
+    }
+
+    /** 检查是否是宝箱物品（不检查领取限制） */
+    public boolean isTreasureItem(String playerName,
+                                  String regionName) {
+        // 宝箱物品区域名包含"宝箱"或" Treasure"关键词
+        return regionName != null && 
+                (regionName.contains("宝箱") || regionName.contains("Treasure"));
     }
 
 
@@ -900,7 +918,7 @@ public class TreasureManager {
     }
 
     public void forceCleanClaims() {
-        // ★ 暴力方案：直接删文件再重建
+        // ★ 暴力方案：直接删文件再重建，清空所有内存
         if (claimFile.exists()) {
             boolean deleted = claimFile.delete();
             plugin.getLogger().info(
@@ -918,6 +936,7 @@ public class TreasureManager {
                             + e.getMessage());
         }
         claimedSet.clear();
+        claimDb.clear();
     }
 
     /**
@@ -1571,7 +1590,12 @@ public class TreasureManager {
         try {
             FileWriter fw = new FileWriter(
                     claimFile);
+            // 保存 claimDb（限时物品，用 . 分隔）
             for (String key : claimDb.keySet()) {
+                fw.write(key + "\n");
+            }
+            // 保存 claimedSet（寻宝物品，用 | 分隔）
+            for (String key : claimedSet) {
                 fw.write(key + "\n");
             }
             fw.close();

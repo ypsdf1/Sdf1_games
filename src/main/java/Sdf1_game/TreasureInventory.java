@@ -588,9 +588,13 @@ public class TreasureInventory {
                 player.getInventory()
                         .addItem(give);
 
-                // 限时物品记录领取限制
-                if (r.getDurationSec() > 0) {
+                // ★ 限时/限次物品记录领取限制（有时限 或 有攻击次数 都要记录）
+                if (r.getDurationSec() > 0
+                        || r.getAttackUsesLimit() > 0) {
                     tm.claim(player.getName(),
+                            r.getDisplayName(),
+                            config.name);
+                    tm.addClaim(player.getName(),
                             r.getDisplayName(),
                             config.name);
                 }

@@ -897,8 +897,6 @@ public class Main extends JavaPlugin
             }
             return r;
         }
-
-
         return r;
     }
 
