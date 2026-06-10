@@ -105,7 +105,11 @@ public class TreasureReward {
     public static int parseDuration(String input) {
         if (input == null || input.isEmpty()) return 0;
         String s = input.trim().toLowerCase();
-        if (s.matches("\\d+")) return Integer.parseInt(s);
+        if (s.matches("\\d+")) {
+            // ★ 兼容旧配置：纯数字 <100 视为分钟，>=100 视为秒
+            int val = Integer.parseInt(s);
+            return val < 100 ? val * 60 : val;
+        }
         if (s.contains("小时") || s.contains("时")) {
             return Integer.parseInt(s.replaceAll("[^\\d]", "")) * 3600;
         }
