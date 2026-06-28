@@ -1,79 +1,65 @@
 package Sdf1_game;
 
-import org.bukkit.Bukkit;
-import org.bukkit.plugin.Plugin;
-
-import java.lang.reflect.Field;
-import java.lang.reflect.Method;
-
 public class BondBridge {
 
     private Object bondManager;
-    private Method addBondsMethod;
+    private Object sdf1Plugin;
     private boolean hooked = false;
 
     public boolean hook(Main plugin) {
-        Plugin sdf1 = Bukkit.getPluginManager()
-                .getPlugin("Sdf1_login");
-
-        if (sdf1 == null || !sdf1.isEnabled()) {
+        try {
+            // 使用 Class.forName 避免 JVM 直接加载 Sdf1_login.Main.class
+            // 如果 Main 中有 Vault import，直接 getClassLoader().loadClass 会导致 NoClassDefFoundError
+            Class<?> mainClass = Class.forName("Sdf1_login.Main");
+            sdf1Plugin = mainClass.getField("INSTANCE").get(null);
+        } catch (ClassNotFoundException e) {
             plugin.getLogger().warning(
-                    "[快问快答] 未找到Sdf1_login，"
-                            + "债券奖励不可用");
+                    "[快问快答] 未找到Sdf1_login类，债券奖励不可用");
+            return false;
+        } catch (Exception e) {
+            plugin.getLogger().warning(
+                    "[快问快答] 获取Sdf1_login实例失败: " + e.getMessage());
+            return false;
+        }
+
+        if (sdf1Plugin == null) {
+            plugin.getLogger().warning(
+                    "[快问快答] Sdf1_login 实例为空");
             return false;
         }
 
         try {
-            bondManager = findManager(sdf1);
+            bondManager = findManager();
             if (bondManager == null) {
                 plugin.getLogger().warning(
                         "[快问快答] 找不到BondManager");
                 return false;
             }
-
-            addBondsMethod =
-                    bondManager.getClass()
-                            .getMethod("addBonds",
-                                    String.class,
-                                    int.class,
-                                    String.class,
-                                    String.class,
-                                    String.class,
-                                    String.class);
-
             hooked = true;
             plugin.getLogger().info(
                     "[快问快答] 债券桥接成功");
             return true;
         } catch (Exception e) {
             plugin.getLogger().warning(
-                    "[快问快答] 桥接失败: "
-                            + e.getMessage());
+                    "[快问快答] 桥接失败: " + e.getMessage());
             return false;
         }
     }
-    /** 查询玩家当前债券余额 */
+
+    /**
+     * 查询玩家当前债券余额
+     * 使用反射避免触发 Vault class loading
+     */
     public int getBonds(String playerName) {
-        if (!isHooked()) return 0;
+        if (!isHooked() || sdf1Plugin == null) return 0;
         try {
-            org.bukkit.plugin.Plugin plug =
-                    org.bukkit.Bukkit
-                            .getPluginManager()
-                            .getPlugin("Sdf1_login");
-            if (plug == null) return 0;
+            Class<?> mainClass = Class.forName("Sdf1_login.Main");
+            java.lang.reflect.Method getBM = mainClass.getMethod("getBondManager");
+            Object bm = getBM.invoke(sdf1Plugin);
 
-            Object bondManager =
-                    plug.getClass()
-                            .getMethod("getBondManager")
-                            .invoke(plug);
-
-            Object result =
-                    bondManager.getClass()
-                            .getMethod("getBonds",
-                                    String.class)
-                            .invoke(bondManager,
-                                    playerName);
-
+            java.lang.reflect.Method getBondsM = bm.getClass()
+                    .getMethod("getBonds", String.class);
+            Object result = getBondsM.invoke(bm, playerName);
             return (int) result;
         } catch (Exception e) {
             return 0;
@@ -81,34 +67,36 @@ public class BondBridge {
     }
 
 
-    private Object findManager(Plugin sdf1) {
-        Class<?> c = sdf1.getClass();
+    /**
+     * findManager: 尝试多种方式获取 BondManager 实例
+     * 完全使用反射,避免触发 Main.class 的 Vault 依赖
+     */
+    private Object findManager() throws Exception {
+        Class<?> mainClass = Class.forName("Sdf1_login.Main");
 
-        // 策略1: getBondManager()
+        // 策略1: getBondManager() 方法
         try {
-            Method m = c.getMethod("getBondManager");
-            Object r = m.invoke(sdf1);
+            java.lang.reflect.Method m = mainClass.getMethod("getBondManager");
+            Object r = m.invoke(sdf1Plugin);
             if (r != null) return r;
-        } catch (Exception ignored) {
+        } catch (NoSuchMethodException ignored) {
         }
 
         // 策略2: 字段 bondManager
         try {
-            Field f = c.getDeclaredField(
-                    "bondManager");
+            java.lang.reflect.Field f = mainClass.getDeclaredField("bondManager");
             f.setAccessible(true);
-            Object r = f.get(sdf1);
+            Object r = f.get(sdf1Plugin);
             if (r != null) return r;
-        } catch (Exception ignored) {
+        } catch (NoSuchFieldException ignored) {
         }
 
         // 策略3: 遍历字段按类型名查找
         try {
-            for (Field f : c.getDeclaredFields()) {
-                if (f.getType().getSimpleName()
-                        .equals("BondManager")) {
+            for (java.lang.reflect.Field f : mainClass.getDeclaredFields()) {
+                if (f.getType().getSimpleName().equals("BondManager")) {
                     f.setAccessible(true);
-                    Object r = f.get(sdf1);
+                    Object r = f.get(sdf1Plugin);
                     if (r != null) return r;
                 }
             }
@@ -118,13 +106,15 @@ public class BondBridge {
         return null;
     }
 
-    public boolean addBonds(String player,
-                            int amount,
-                            String reason) {
-        if (!hooked) return false;
+    public boolean addBonds(String player, int amount, String reason) {
+        if (!hooked || bondManager == null) return false;
         try {
-            int r = (int) addBondsMethod.invoke(
-                    bondManager,
+            java.lang.reflect.Method m = bondManager.getClass()
+                    .getMethod("addBonds",
+                            String.class, int.class,
+                            String.class, String.class,
+                            String.class, String.class);
+            int r = (int) m.invoke(bondManager,
                     player, amount,
                     "quiz_reward", "",
                     "快问快答", reason);

@@ -13,9 +13,6 @@ import java.net.HttpURLConnection;
 import java.net.URL;
 import java.security.SecureRandom;
 import java.security.cert.X509Certificate;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicReference;
 
 import javax.net.ssl.HttpsURLConnection;
 import javax.net.ssl.SSLContext;
@@ -48,18 +45,30 @@ public class UpdateChecker {
     private static final String GITHUB_REPO = "Sdf1_games";
     private static final String GITEE_OWNER = "nihaoshidifu";
     private static final String GITEE_REPO = "sdf1_game";
+    private static final String GITEA_OWNER = "youpaishidifu";
+    private static final String GITEA_REPO = "Sdf1_game";
 
-    // API 地址（使用releases/latest获取最新版本）
+    // API 地址（按优先级顺序）
+    // 第一路：自己的 Gitea
+    private static final String GITEA_API =
+            "https://git.ypshidifu.cn/api/v1/repos/" + GITEA_OWNER + "/" + GITEA_REPO + "/releases/latest";
+    // 第二路：GitHub
     private static final String GITHUB_API =
             "https://api.github.com/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO + "/releases/latest";
+    // 第三路：Gitee
     private static final String GITEE_API =
             "https://gitee.com/api/v5/repos/" + GITEE_OWNER + "/" + GITEE_REPO + "/releases/latest";
+    // 第四路：GitCode
+    private static final String GITCODE_API =
+            "https://gitcode.com/api/v5/repos/" + GITHUB_OWNER + "/" + GITHUB_REPO + "/releases?per_page=1";
 
-    // 第三路备选：宝塔静态HTML
+    // 第五路备选：宝塔静态HTML
     private static final String FALLBACK_HTML =
             "https://caoyuan.ypshidifu.cn/update_check.html";
 
     // 仓库页面链接
+    private static final String GITEA_LINK =
+            "https://git.ypshidifu.cn/" + GITEA_OWNER + "/" + GITEA_REPO + "/releases";
     private static final String GITHUB_LINK =
             "https://github.com/" + GITHUB_OWNER + "/" + GITHUB_REPO + "/releases";
     private static final String GITEE_LINK =
@@ -157,72 +166,66 @@ public class UpdateChecker {
             plugin.getLogger().info("[Sdf1_game] 启动自动检查更新...");
         }
 
-        // ★ 双通道并行执行，一路成功掐断另一路
-        AtomicBoolean cancelled = new AtomicBoolean(false);
-        AtomicReference<CheckResult> ghResult = new AtomicReference<>();
-        AtomicReference<CheckResult> geResult = new AtomicReference<>();
-        CountDownLatch latch = new CountDownLatch(2);
+        // 按优先级依次尝试: git.ypshidifu.cn → GitHub → Gitee → GitCode → BaoTa
+        String[][] channels = {
+            {GITEA_API, "git.ypshidifu.cn", GITEA_LINK},
+            {GITHUB_API, "GitHub", GITHUB_LINK},
+            {GITEE_API, "Gitee", GITEE_LINK},
+        };
 
-        // 通道1：GitHub
-        Thread ghThread = new Thread(() -> {
-            if (!cancelled.get()) {
-                ghResult.set(tryChannel(GITHUB_API, "GitHub", GITHUB_LINK));
-                if (ghResult.get().isSuccess()) {
-                    cancelled.set(true); // 成功则取消另一路
-                }
+        CheckResult chosen = null;
+        String lastError = "";
+
+        // 前三路: releases/latest 格式 (返回对象)
+        for (String[] ch : channels) {
+            CheckResult result = tryChannel(ch[0], ch[1], ch[2]);
+            if (result.isSuccess()) {
+                chosen = result;
+                break;
             }
-            latch.countDown();
-        });
-        ghThread.setDaemon(true);
-
-        // 通道2：Gitee
-        Thread geThread = new Thread(() -> {
-            if (!cancelled.get()) {
-                geResult.set(tryChannel(GITEE_API, "Gitee", GITEE_LINK));
-                if (geResult.get().isSuccess()) {
-                    cancelled.set(true); // 成功则取消另一路
-                }
+            if (result.error != null) {
+                lastError = result.error;
             }
-            latch.countDown();
-        });
-        geThread.setDaemon(true);
-
-        ghThread.start();
-        geThread.start();
-
-        try {
-            latch.await(); // 等待两路都完成
-        } catch (InterruptedException ignored) {
         }
 
-        CheckResult gh = ghResult.get();
-        CheckResult ge = geResult.get();
+        // GitCode: releases 数组格式 (返回数组)
+        if (chosen == null) {
+            CheckResult gdResult = tryGitCodeChannel();
+            if (gdResult.isSuccess()) {
+                chosen = gdResult;
+            } else {
+                if (gdResult.error != null) {
+                    lastError = gdResult.error;
+                }
+            }
+        }
 
-        // 选择成功的结果
-        CheckResult chosen = null;
-
-        if (gh != null && gh.isSuccess()) {
-            chosen = gh;
-        } else if (ge != null && ge.isSuccess()) {
-            chosen = ge;
-        } else {
-            // ★ 双通道均失败，尝试第三路备选（宝塔静态HTML）
-            plugin.getLogger().info("[Sdf1_game] GitHub/Gitee 均失败，尝试第三路备选 BaoTa...");
+        // 第五路: 宝塔静态 HTML
+        if (chosen == null) {
+            plugin.getLogger().info("[Sdf1_game] 前四路均失败，尝试第五路备选 BaoTa...");
             CheckResult fbResult = tryFallbackChannel();
-            if (fbResult != null && fbResult.isSuccess()) {
+            if (fbResult.isSuccess()) {
                 chosen = fbResult;
-                plugin.getLogger().info("[Sdf1_game] 第三路备选 BaoTa 检查成功: " + fbResult.version);
+                plugin.getLogger().info("[Sdf1_game] 第五路备选 BaoTa 检查成功: " + fbResult.version);
             } else {
                 failCount++;
                 StringBuilder sb = new StringBuilder();
-                if (gh != null && gh.error != null) {
-                    sb.append("§7GitHub: §c").append(gh.error);
+                sb.append("§7git.ypshidifu.cn: §c").append(lastError != null ? lastError : "未知错误");
+
+                // 输出各通道失败信息
+                for (String[] ch : channels) {
+                    CheckResult r = tryChannel(ch[0], ch[1], ch[2]);
+                    if (!r.isSuccess() && r.error != null) {
+                        if (sb.length() > 0) sb.append("\n");
+                        sb.append("§7").append(ch[1]).append(": §c").append(r.error);
+                    }
                 }
-                if (ge != null && ge.error != null) {
+                CheckResult gdTest = tryGitCodeChannel();
+                if (!gdTest.isSuccess() && gdTest.error != null) {
                     if (sb.length() > 0) sb.append("\n");
-                    sb.append("§7Gitee:  §c").append(ge.error);
+                    sb.append("§7GitCode: §c").append(gdTest.error);
                 }
-                if (fbResult != null && fbResult.error != null) {
+                if (fbResult != null && !fbResult.isSuccess() && fbResult.error != null) {
                     if (sb.length() > 0) sb.append("\n");
                     sb.append("§7BaoTa:  §c").append(fbResult.error);
                 }
@@ -247,13 +250,17 @@ public class UpdateChecker {
                 }
                 return;
             }
+        } else {
+            failCount = 0;
         }
 
         // 至少一个通道成功
-        failCount = 0;
+        if (chosen != null) {
+            failCount = 0;
+        }
 
         // 检查禁用信号
-        if (isDisableSignal(chosen.version)) {
+        if (chosen != null && isDisableSignal(chosen.version)) {
             autoCheckDisabled = true;
             saveDisabledState();
             plugin.getLogger().info(
@@ -266,8 +273,8 @@ public class UpdateChecker {
         }
 
         // 手动调用：成功才解除熔断和禁用
-        if (!isAuto) {
-            manualSuccess = true; // 标记手动成功，不再执行后续自动检查
+        if (!isAuto && chosen != null) {
+            manualSuccess = true;
             if (circuitTripped) {
                 circuitTripped = false;
             }
@@ -281,13 +288,11 @@ public class UpdateChecker {
         final String lnk = chosen.link;
         final String rv = chosen.version;
 
-        // ★ 自动检查也记录日志（含下载链接 + 颜色提醒）
-        if (isAuto) {
+        if (isAuto && chosen != null) {
             boolean hasUpdate = isNewer(rv, currentVersion);
             String status = hasUpdate
                     ? "(有新版本!)"
                     : "(已是最新)";
-            // 使用Bukkit.getConsoleSender().sendMessage()输出彩色日志
             Bukkit.getConsoleSender().sendMessage("§a[Sdf1_game] §e更新检测成功 via: " + src
                     + " | 本地: " + currentVersion + " | 远程: " + rv + " §7" + status);
             if (hasUpdate) {
@@ -295,27 +300,21 @@ public class UpdateChecker {
             }
         }
 
-        Bukkit.getScheduler().runTask(plugin, () -> {
-            if (sender == null) return;
+        if (chosen != null && sender != null) {
+            Bukkit.getScheduler().runTask(plugin, () -> {
+                sender.sendMessage("§e[Sdf1_game] [更新] 检测成功 via: §a" + src);
+                sender.sendMessage("§e[Sdf1_game] [更新] 本地版本: §f" + currentVersion);
+                sender.sendMessage("§e[Sdf1_game] [更新] 远程版本: §f" + rv);
 
-            sender.sendMessage("§e[Sdf1_game] [更新] 检测成功 via: §a" + src);
-            sender.sendMessage("§e[Sdf1_game] [更新] 本地版本: §f" + currentVersion);
-            sender.sendMessage("§e[Sdf1_game] [更新] 远程版本: §f" + rv);
-
-            if (isNewer(rv, currentVersion)) {
-                sender.sendMessage("§c[Sdf1_game] [更新] 发现新版本: " + rv);
-                sender.sendMessage("§a[Sdf1_game] 请前往仓库下载更新:");
-                sender.sendMessage("§a§l" + lnk);
-            } else {
-                sender.sendMessage("§a[Sdf1_game] [更新] 已是最新版本");
-            }
-
-            // 显示另一通道的失败原因
-            CheckResult other = (src.equals("GitHub")) ? ge : gh;
-            if (other != null && !other.isSuccess() && other.error != null) {
-                sender.sendMessage("§7[Sdf1_game] [更新] " + other.source + " 不可用: " + other.error);
-            }
-        });
+                if (isNewer(rv, currentVersion)) {
+                    sender.sendMessage("§c[Sdf1_game] [更新] 发现新版本: " + rv);
+                    sender.sendMessage("§a[Sdf1_game] 请前往仓库下载更新:");
+                    sender.sendMessage("§a§l" + lnk);
+                } else {
+                    sender.sendMessage("§a[Sdf1_game] [更新] 已是最新版本");
+                }
+            });
+        }
     }
 
     // ========== 禁用信号判断 ==========
@@ -482,6 +481,153 @@ public class UpdateChecker {
                 conn.disconnect();
             }
         }
+    }
+
+    /**
+     * 第四路: GitCode releases API (返回数组格式 [{...}])
+     * 接口: api.gitcode.com/api/v5/repos/{owner}/{repo}/releases?per_page=1
+     */
+    private CheckResult tryGitCodeChannel() {
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL(GITCODE_API);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setRequestMethod("GET");
+            conn.setRequestProperty("User-Agent",
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+                            + "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36");
+            conn.setConnectTimeout(TIMEOUT_MS);
+            conn.setReadTimeout(TIMEOUT_MS);
+            conn.setInstanceFollowRedirects(true);
+
+            int code = conn.getResponseCode();
+            if (code == 404) {
+                return new CheckResult(null, "GitCode", GITHUB_LINK, "GitCode: 未找到 (HTTP 404)");
+            }
+            if (code == 403) {
+                return new CheckResult(null, "GitCode", GITHUB_LINK, "GitCode: 被限流 (HTTP 403)");
+            }
+            if (code != 200) {
+                return new CheckResult(null, "GitCode", GITHUB_LINK, "GitCode: HTTP " + code);
+            }
+
+            BufferedReader reader = new BufferedReader(new InputStreamReader(conn.getInputStream()));
+            StringBuilder sb = new StringBuilder();
+            String line;
+            while ((line = reader.readLine()) != null) {
+                sb.append(line);
+            }
+            reader.close();
+
+            String json = sb.toString();
+
+            // GitCode 返回数组格式: [{"name":"v1.1",...}]
+            // 检测 '[' 开头
+            String trimmed = json.trim();
+            if (trimmed.startsWith("[")) {
+                // 找匹配的 ']' 和中间的对象
+                int closeIdx = findMatchingBracket(trimmed, 0);
+                if (closeIdx > 0) {
+                    String objStr = trimmed.substring(0, closeIdx + 1);
+                    return parseJsonString(objStr, "GitCode", GITHUB_LINK);
+                }
+            } else {
+                // 如果是普通对象,直接用已有逻辑
+                return parseJsonString(trimmed, "GitCode", GITHUB_LINK);
+            }
+
+            return new CheckResult(null, "GitCode", GITHUB_LINK, "GitCode: 无法解析数组格式");
+
+        } catch (java.net.SocketTimeoutException e) {
+            return new CheckResult(null, "GitCode", GITHUB_LINK, "GitCode: 连接超时");
+        } catch (java.net.ConnectException e) {
+            return new CheckResult(null, "GitCode", GITHUB_LINK, "GitCode: 连接被拒绝");
+        } catch (java.net.UnknownHostException e) {
+            return new CheckResult(null, "GitCode", GITHUB_LINK, "GitCode: DNS解析失败");
+        } catch (Exception e) {
+            return new CheckResult(null, "GitCode", GITHUB_LINK, "GitCode: " + e.getMessage());
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    /**
+     * 从数组 "[{...}]" 中提取第一个对象的 JSON 字符串并解析
+     */
+    private CheckResult parseFromArrayJson(String arrJson, String source, String link) {
+        String trimmed = arrJson.trim();
+        if (!trimmed.startsWith("[")) {
+            return new CheckResult(null, source, link, source + ": 预期数组格式");
+        }
+        int closeIdx = findMatchingBracket(trimmed, 0);
+        if (closeIdx < 0) {
+            return new CheckResult(null, source, link, source + ": 括号不匹配");
+        }
+        String firstObj = trimmed.substring(1, closeIdx).trim();
+        // 去掉可能的尾部逗号
+        while (firstObj.endsWith(",")) {
+            firstObj = firstObj.substring(0, firstObj.length() - 1).trim();
+        }
+        return parseJsonString(firstObj, source, link);
+    }
+
+    /**
+     * 解析 JSON 字符串(可能是对象或数组)
+     */
+    private CheckResult parseJsonString(String json, String source, String link) {
+        String trimmed = json.trim();
+
+        // 如果是数组 [...], 提取第一个对象
+        if (trimmed.startsWith("[")) {
+            return parseFromArrayJson(trimmed, source, link);
+        }
+
+        // 对象格式: {"tag_name": "..."}
+        int idx = trimmed.indexOf("\"tag_name\"");
+        if (idx >= 0) {
+            int colon = trimmed.indexOf(":", idx);
+            int q1 = trimmed.indexOf("\"", colon + 1);
+            int q2 = trimmed.indexOf("\"", q1 + 1);
+            if (q2 > q1) {
+                return new CheckResult(cleanTag(trimmed.substring(q1 + 1, q2)), source, link, null);
+            }
+        }
+
+        // 备用: "name" 字段
+        idx = trimmed.indexOf("\"name\"");
+        if (idx >= 0) {
+            int colon = trimmed.indexOf(":", idx);
+            int q1 = trimmed.indexOf("\"", colon + 1);
+            int q2 = trimmed.indexOf("\"", q1 + 1);
+            if (q2 > q1) {
+                return new CheckResult(cleanTag(trimmed.substring(q1 + 1, q2)), source, link, null);
+            }
+        }
+
+        return new CheckResult(null, source, link, source + ": 无法解析版本号");
+    }
+
+    /**
+     * 查找匹配的右括号（支持嵌套括号）
+     * 从索引 i 处的 '[' 找到对应的 ']'
+     */
+    private int findMatchingBracket(String json, int i) {
+        if (i >= json.length() || json.charAt(i) != '[') return -1;
+        int depth = 1;
+        boolean inString = false;
+        for (int j = i + 1; j < json.length(); j++) {
+            char c = json.charAt(j);
+            if (c == '"' && (j == 0 || json.charAt(j - 1) != '\\')) {
+                inString = !inString;
+            }
+            if (inString) continue;
+            if (c == '[') depth++;
+            else if (c == ']') {
+                depth--;
+                if (depth == 0) return j;
+            }
+        }
+        return -1;
     }
 
     private String parseTagName(String json) {
