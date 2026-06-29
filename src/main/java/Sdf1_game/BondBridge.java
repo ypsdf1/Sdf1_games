@@ -1,5 +1,7 @@
 package Sdf1_game;
 
+import org.bukkit.Bukkit;
+
 public class BondBridge {
 
     private Object bondManager;
@@ -7,55 +9,45 @@ public class BondBridge {
     private boolean hooked = false;
 
     public boolean hook(Main plugin) {
+        // Sdf1_login 已经加载完毕，直接通过 Bukkit 获取实例
+        // （Sdf1_login.Main 的 Vault import 不会在这里触发 class loading，
+        //   因为我们只调用 getMethod 反射，不会解析 Main 的字段签名）
         try {
-            // 使用 Class.forName 避免 JVM 直接加载 Sdf1_login.Main.class
-            // 如果 Main 中有 Vault import，直接 getClassLoader().loadClass 会导致 NoClassDefFoundError
-            Class<?> mainClass = Class.forName("Sdf1_login.Main");
-            sdf1Plugin = mainClass.getField("INSTANCE").get(null);
-        } catch (ClassNotFoundException e) {
-            plugin.getLogger().warning(
-                    "[快问快答] 未找到Sdf1_login类，债券奖励不可用");
-            return false;
+            org.bukkit.plugin.Plugin pl = Bukkit.getPluginManager().getPlugin("Sdf1_login");
+            if (pl == null || !pl.isEnabled()) {
+                plugin.getLogger().warning("[快问快答] 未找到Sdf1_login，债券奖励不可用");
+                return false;
+            }
+            sdf1Plugin = pl;
         } catch (Exception e) {
-            plugin.getLogger().warning(
-                    "[快问快答] 获取Sdf1_login实例失败: " + e.getMessage());
-            return false;
-        }
-
-        if (sdf1Plugin == null) {
-            plugin.getLogger().warning(
-                    "[快问快答] Sdf1_login 实例为空");
+            plugin.getLogger().warning("[快问快答] 获取Sdf1_login实例失败: " + e.getMessage());
             return false;
         }
 
         try {
             bondManager = findManager();
             if (bondManager == null) {
-                plugin.getLogger().warning(
-                        "[快问快答] 找不到BondManager");
+                plugin.getLogger().warning("[快问快答] 找不到BondManager");
                 return false;
             }
             hooked = true;
-            plugin.getLogger().info(
-                    "[快问快答] 债券桥接成功");
+            plugin.getLogger().info("[快问快答] 债券桥接成功");
             return true;
         } catch (Exception e) {
-            plugin.getLogger().warning(
-                    "[快问快答] 桥接失败: " + e.getMessage());
+            plugin.getLogger().warning("[快问快答] 桥接失败: " + e.getMessage());
             return false;
         }
     }
 
     /**
      * 查询玩家当前债券余额
-     * 使用反射避免触发 Vault class loading
      */
     public int getBonds(String playerName) {
         if (!isHooked() || sdf1Plugin == null) return 0;
         try {
-            Class<?> mainClass = Class.forName("Sdf1_login.Main");
-            java.lang.reflect.Method getBM = mainClass.getMethod("getBondManager");
+            java.lang.reflect.Method getBM = sdf1Plugin.getClass().getMethod("getBonds");
             Object bm = getBM.invoke(sdf1Plugin);
+            if (bm == null) return 0;
 
             java.lang.reflect.Method getBondsM = bm.getClass()
                     .getMethod("getBonds", String.class);
@@ -66,17 +58,15 @@ public class BondBridge {
         }
     }
 
-
     /**
      * findManager: 尝试多种方式获取 BondManager 实例
-     * 完全使用反射,避免触发 Main.class 的 Vault 依赖
      */
     private Object findManager() throws Exception {
-        Class<?> mainClass = Class.forName("Sdf1_login.Main");
+        Class<?> mainClass = sdf1Plugin.getClass();
 
         // 策略1: getBondManager() 方法
         try {
-            java.lang.reflect.Method m = mainClass.getMethod("getBondManager");
+            java.lang.reflect.Method m = mainClass.getMethod("getBonds");
             Object r = m.invoke(sdf1Plugin);
             if (r != null) return r;
         } catch (NoSuchMethodException ignored) {
