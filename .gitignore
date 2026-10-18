@@ -39,3 +39,6 @@ build/
 .DS_Store
 ### Backup (local only) ###
 backup/
+
+# 开发辅助文档（本地保留，不推送到仓库）
+/代码关联关系.md
