@@ -2,7 +2,7 @@
 
 ## 开源协议
 
-本项目（Sdf1_login 插件，含 Java 端与 php 端）采用 **GNU Affero General Public License v3.0（AGPL-3.0）** 授权，协议全文见 [LICENSE](LICENSE)。
+本项目（Sdf1_game 插件）采用 **GNU Affero General Public License v3.0（AGPL-3.0）** 授权，协议全文见 [LICENSE](LICENSE)。
 
 - 你可以自由使用、修改、分发本项目。
 - **若你把本项目（或其修改版）部署为网络服务对外开放，必须向使用该服务的用户提供完整的对应源代码**（AGPL 第 13 条）。
